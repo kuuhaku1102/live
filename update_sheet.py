@@ -8,9 +8,9 @@ import requests
 from bs4 import BeautifulSoup
 import gspread
 
-SPREADSHEET_ID = "YOUR_SPREADSHEET_ID"
-SHEET_NAME = "live"
-LISTING_URL = "https://example.com/listing"
+SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "YOUR_SPREADSHEET_ID")
+SHEET_NAME = os.environ.get("SHEET_NAME", "live")
+LISTING_URL = os.environ.get("LISTING_URL", "https://example.com/listing")
 
 
 def get_gspread_client():
