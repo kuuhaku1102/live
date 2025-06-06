@@ -3,7 +3,7 @@ name: Update Sheet
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 0 * * *'
+      - cron: '0 */2 * * *' # 2時間ごとに実行（0時、2時、4時...）
 
 jobs:
   run:
