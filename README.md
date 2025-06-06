@@ -32,3 +32,14 @@ python update_sheet.py
 ```
 
 The script reads the listing page, fetches each profile's detail page, and appends any new entries to the specified Google Sheet.
+
+## GitHub Actions
+
+A workflow in `.github/workflows/update_sheet.yml` can run the scraper on a schedule or on demand. To use it, add the following secrets to your repository settings:
+
+- `GSHEET_JSON` – base64-encoded service account JSON
+- `SPREADSHEET_ID` – ID of the spreadsheet
+- `SHEET_NAME` – name of the worksheet (e.g. `live`)
+- `LISTING_URL` – listing page URL to scrape
+
+Ensure GitHub Actions are enabled for your repository or configure a self-hosted runner.
