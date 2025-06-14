@@ -122,6 +122,9 @@ def main():
         print("Failed to fetch listing page")
         return
 
+    # Print the first 2000 characters of the fetched listing_html
+    print(listing_html[:2000])
+
     items = parse_listing(listing_html, LISTING_URL)
     print(f"Found {len(items)} entries")
 
