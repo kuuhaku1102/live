@@ -11,6 +11,9 @@ import gspread
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "YOUR_SPREADSHEET_ID")
 SHEET_NAME = os.environ.get("SHEET_NAME", "fanza")
 LISTING_URL = os.environ.get("LISTING_URL", "https://www.dmm.co.jp/live/chat/")
+# Whether to use Playwright for fetching pages. Defaults to True because the
+# listing page loads entries via JavaScript.
+USE_PLAYWRIGHT = os.environ.get("USE_PLAYWRIGHT", "1") != "0"
 
 
 def get_gspread_client():
@@ -27,16 +30,45 @@ def open_sheet():
     return sh.worksheet(SHEET_NAME)
 
 
-def fetch_html(url):
+def fetch_html(url, use_playwright=False):
+    """Fetch a page and return its HTML."""
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0 Safari/537.36"
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/110.0 Safari/537.36"
+        )
     }
+
+    if not use_playwright:
+        try:
+            resp = requests.get(url, headers=headers, timeout=20)
+            resp.raise_for_status()
+            return resp.text
+        except requests.exceptions.RequestException as e:
+            print(f"Error fetching {url}: {e}")
+            return None
+
+    # Fallback to playwright when JavaScript rendering is required.
     try:
-        resp = requests.get(url, headers=headers, timeout=20)
-        resp.raise_for_status()
-        return resp.text
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching {url}: {e}")
+        from playwright.sync_api import sync_playwright
+    except Exception as e:  # pragma: no cover - playwright may not be installed
+        print(f"Playwright unavailable: {e}")
+        return None
+
+    try:
+        with sync_playwright() as p:
+            browser = p.firefox.launch(headless=True)
+            context = browser.new_context()
+            page = context.new_page()
+            page.set_extra_http_headers(headers)
+            page.goto(url)
+            page.wait_for_load_state("networkidle")
+            html = page.content()
+            browser.close()
+            return html
+    except Exception as e:
+        print(f"Playwright error fetching {url}: {e}")
         return None
 
 
@@ -80,7 +112,12 @@ def main():
     ws = open_sheet()
     existing_urls = set(ws.col_values(3))
 
-    listing_html = fetch_html(LISTING_URL)
+    # The listing page loads its content dynamically, so we try Playwright first
+    # and fall back to a simple request if Playwright is not available.
+    listing_html = (
+        fetch_html(LISTING_URL, use_playwright=USE_PLAYWRIGHT)
+        or fetch_html(LISTING_URL)
+    )
     if not listing_html:
         print("Failed to fetch listing page")
         return
@@ -91,7 +128,11 @@ def main():
     for item in items:
         if item["url"] in existing_urls:
             continue
-        detail_html = fetch_html(item["url"])
+        # Detail pages might also rely on JavaScript, so fall back to Playwright
+        detail_html = (
+            fetch_html(item["url"])
+            or fetch_html(item["url"], use_playwright=USE_PLAYWRIGHT)
+        )
         if not detail_html:
             print(f"Skipping {item['name']} - could not fetch detail")
             continue

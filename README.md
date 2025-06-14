@@ -23,6 +23,8 @@ This repository contains a scraper that extracts profile data from a listing pag
    ```bash
    export LISTING_URL=https://example.com/listing
    export SHEET_NAME=madam
+   # Set USE_PLAYWRIGHT=0 to disable JavaScript rendering with Playwright
+   export USE_PLAYWRIGHT=1
    ```
 
 ## Running
