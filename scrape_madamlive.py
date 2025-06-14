@@ -47,6 +47,10 @@ def parse_listing(html, base_url):
     entries = []
 
     for dl in soup.select("dl.onlinegirl-dl-big"):
+        name_a = dl.select_one("h3 a")
+        img_tag = dl.select_one("dd.onlinegirl-dd-img-big img")
+        if not name_a:
+            continue
         name_a = dl.select_one("dt.onlinegirl-dt-big h3 a")
         img_tag = dl.select_one("dd.onlinegirl-dd-img-big img")
         comment_tag = dl.select_one("span.onlinegirl-dd-comment-span-big")
@@ -101,6 +105,29 @@ def parse_detail(html):
             return ""
         dd = dt.find_next("dd")
         return dd.get_text(strip=True) if dd else ""
+
+    def text_by_class(cls):
+        tag = soup.select_one(f"dd.{cls}")
+        return tag.get_text(strip=True) if tag else ""
+
+    detail = {
+        "age": text_by_class("p-age") or get_dd("年齢"),
+        "height": text_by_class("p-height") or get_dd("身長"),
+        "cup": text_by_class("p-cup") or text_by_class("p-bwh") or get_dd("(カップ数|スリーサイズ)"),
+        "face": text_by_class("p-face") or get_dd("顔出し"),
+        "toy": text_by_class("p-toy") or get_dd("おもちゃ"),
+        "appear": text_by_class("p-appear") or get_dd("出没時間"),
+        "style": text_by_class("p-style") or get_dd("(スタイル|体型)"),
+        "job": text_by_class("p-job") or get_dd("職業"),
+        "hobby": text_by_class("p-hobby") or text_by_class("p-boom") or get_dd("(趣味|マイブーム)"),
+        "favor": text_by_class("p-favor") or get_dd("(好みのタイプ|好きな男性のタイプ)"),
+        "seikantai": text_by_class("p-seikantai") or get_dd("性感帯"),
+        "genre": text_by_class("p-genre") or get_dd("ジャンル"),
+    }
+
+    if not detail["genre"]:
+        genres = [div.get_text(strip=True) for div in soup.select("dd.genre-list div.genre-div")]
+        detail["genre"] = ",".join(genres)
 
     mapping = {
         "age": r"年齢",
