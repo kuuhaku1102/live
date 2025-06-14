@@ -3,6 +3,7 @@ import json
 import base64
 import re
 import time
+import random
 from urllib.parse import urljoin
 
 import gspread
@@ -27,20 +28,33 @@ def open_sheet():
 
 def fetch_listing_with_js(url):
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
+        # ヘッドレスモードOFFで人間らしさを出す＋bot判定回避フラグ
+        browser = p.chromium.launch(headless=False, args=['--disable-blink-features=AutomationControlled'])
+        page = browser.new_page(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+            extra_http_headers={
+                "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+                "Referer": "https://www.madamlive.tv/"
+            }
+        )
         print(f"Navigating to: {url}")
-        page.goto(url, timeout=60000)
-        page.wait_for_selector("dl.onlinegirl-dl-big", timeout=15000)
+        page.goto(url, timeout=60000, wait_until="networkidle")
+        # 人間らしいランダム待機
+        time.sleep(3 + random.random() * 2)
+        # マウス・キーボードの操作も入れてbot感を減らす
+        page.mouse.move(300, 300)
+        page.keyboard.press("ArrowDown")
+        time.sleep(1 + random.random() * 1)
         html = page.content()
         browser.close()
         return html
 
 def fetch_html(url):
-    # 詳細ページはrequestsでOK（必要ならPlaywrightでも切替可能）
     import requests
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+        "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+        "Referer": "https://www.madamlive.tv/"
     }
     try:
         resp = requests.get(url, headers=headers, timeout=20)
@@ -142,7 +156,7 @@ def main():
         ws.append_row(row)
         print(f"Added: {item['name']} - {item['url']}")
 
-        time.sleep(1.5)  # 過剰アクセス防止
+        time.sleep(1.5 + random.random())  # 過剰アクセス防止&人間っぽさ
 
 if __name__ == "__main__":
     main()
