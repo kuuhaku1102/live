@@ -18,9 +18,11 @@ This repository contains a scraper that extracts profile data from a listing pag
    export SPREADSHEET_ID=your_spreadsheet_id
    export SHEET_NAME=live
    ```
-4. Set the URL of the listing page to scrape:
+4. Set the URL of the listing page to scrape. The madamlive scraper uses
+   `madam` as the default sheet name, so override it if necessary:
    ```bash
    export LISTING_URL=https://example.com/listing
+   export SHEET_NAME=madam
    ```
 
 ## Running
@@ -28,14 +30,15 @@ This repository contains a scraper that extracts profile data from a listing pag
 Run the scraper with Python:
 
 ```bash
-python update_sheet.py
+python update_sheet.py             # generic scraper
+python scrape_madamlive.py         # scraper for madamlive.tv
 ```
 
-The script reads the listing page, fetches each profile's detail page, and appends any new entries to the specified Google Sheet.
+Both scripts read a listing page, fetch each profile's detail page, and append new entries to the configured Google Sheet.
 
 ## GitHub Actions
 
-A workflow in `.github/workflows/update_sheet.yml` can run the scraper on a schedule or on demand. To use it, add the following secrets to your repository settings:
+A workflow in `.github/workflows/update_sheet.yml` can run the generic scraper, while `.github/workflows/scrape_madamlive.yml` runs the madamlive-specific one. To use them, add the following secrets to your repository settings:
 
 - `GSHEET_JSON` – base64-encoded service account JSON
 - `SPREADSHEET_ID` – ID of the spreadsheet
