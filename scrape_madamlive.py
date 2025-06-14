@@ -148,4 +148,4 @@ def main():
         ws.append_row(row)
         print(f"Added: {item['name']} - {item['url']}")
 
-        time.sleep(1.5
+        time.sleep(1.5)
