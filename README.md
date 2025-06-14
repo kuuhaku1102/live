@@ -18,9 +18,11 @@ This repository contains a scraper that extracts profile data from a listing pag
    export SPREADSHEET_ID=your_spreadsheet_id
    export SHEET_NAME=live
    ```
-4. Set the URL of the listing page to scrape:
+4. Set the URL of the listing page to scrape. The madamlive scraper uses
+   `madam` as the default sheet name, so override it if necessary:
    ```bash
    export LISTING_URL=https://example.com/listing
+   export SHEET_NAME=madam
    ```
 
 ## Running
