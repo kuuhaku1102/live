@@ -42,6 +42,31 @@ def fetch_html(url):
 
 
 def parse_listing(html, base_url):
+    """Parse the listing page and return basic profile info."""
+    soup = BeautifulSoup(html, "html.parser")
+    entries = []
+
+    for dl in soup.select("dl.onlinegirl-dl-big"):
+        name_a = dl.select_one("dt.onlinegirl-dt-big h3 a")
+        img_tag = dl.select_one("dd.onlinegirl-dd-img-big img")
+        comment_tag = dl.select_one("span.onlinegirl-dd-comment-span-big")
+        if not (name_a and img_tag):
+            continue
+
+        name = name_a.get_text(strip=True)
+        url = name_a.get("href", "")
+        if url and not url.startswith("http"):
+            url = urljoin(base_url, url)
+        image = urljoin(base_url, img_tag.get("src", ""))
+        comment = comment_tag.get_text(strip=True) if comment_tag else ""
+
+        entries.append({
+            "name": name,
+            "image": image,
+            "url": url,
+            "comment": comment,
+        })
+
     """Parse madamlive listing page."""
     soup = BeautifulSoup(html, "html.parser")
     entries = []
@@ -78,6 +103,18 @@ def parse_detail(html):
         return dd.get_text(strip=True) if dd else ""
 
     mapping = {
+        "age": r"年齢",
+        "height": r"身長",
+        "cup": r"(カップ数|スリーサイズ)",
+        "face": r"顔出し",
+        "toy": r"おもちゃ",
+        "appear": r"出没時間",
+        "style": r"(スタイル|体型)",
+        "job": r"職業",
+        "hobby": r"(趣味|マイブーム)",
+        "favor": r"(好みのタイプ|好きな男性のタイプ)",
+        "seikantai": r"性感帯",
+        "genre": r"ジャンル",
         "age": "年齢",
         "height": "身長",
         "cup": "カップ数",
