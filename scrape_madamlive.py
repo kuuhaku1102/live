@@ -67,6 +67,28 @@ def parse_listing(html, base_url):
             "comment": comment,
         })
 
+    """Parse madamlive listing page."""
+    soup = BeautifulSoup(html, "html.parser")
+    entries = []
+    for a in soup.select("a[href]"):
+        name = a.get_text(strip=True)
+        img_tag = a.find("img")
+        if not name or not img_tag:
+            continue
+        url = a.get("href", "")
+        if url and not url.startswith("http"):
+            url = urljoin(base_url, url)
+        img = urljoin(base_url, img_tag.get("src", ""))
+        comment = ""
+        comment_tag = a.find(class_=re.compile("oneword|comment"))
+        if comment_tag:
+            comment = comment_tag.get_text(strip=True)
+        entries.append({
+            "name": name,
+            "url": url,
+            "image": img,
+            "comment": comment,
+        })
     return entries
 
 
@@ -93,6 +115,18 @@ def parse_detail(html):
         "favor": r"(好みのタイプ|好きな男性のタイプ)",
         "seikantai": r"性感帯",
         "genre": r"ジャンル",
+        "age": "年齢",
+        "height": "身長",
+        "cup": "カップ数",
+        "face": "顔出し",
+        "toy": "おもちゃ",
+        "appear": "出没時間",
+        "style": "スタイル",
+        "job": "職業",
+        "hobby": "趣味",
+        "favor": "好みのタイプ",
+        "seikantai": "性感帯",
+        "genre": "ジャンル",
     }
 
     detail = {}
