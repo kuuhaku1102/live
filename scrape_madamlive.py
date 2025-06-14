@@ -2,16 +2,16 @@ import os
 import json
 import base64
 import re
-from urllib.parse import urljoin
 import time
+from urllib.parse import urljoin
 
-import requests
-from bs4 import BeautifulSoup
 import gspread
+from bs4 import BeautifulSoup
+from playwright.sync_api import sync_playwright
 
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "YOUR_SPREADSHEET_ID")
 SHEET_NAME = os.environ.get("SHEET_NAME", "madam")
-LISTING_URL = os.environ.get("LISTING_URL", "https://madamlive.tv/listing")
+LISTING_URL = os.environ.get("LISTING_URL", "https://www.madamlive.tv/listing")
 
 def get_gspread_client():
     b64 = os.environ.get("GSHEET_JSON")
@@ -25,7 +25,20 @@ def open_sheet():
     sh = gc.open_by_key(SPREADSHEET_ID)
     return sh.worksheet(SHEET_NAME)
 
+def fetch_listing_with_js(url):
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        print(f"Navigating to: {url}")
+        page.goto(url, timeout=60000)
+        page.wait_for_selector("dl.onlinegirl-dl-big", timeout=15000)
+        html = page.content()
+        browser.close()
+        return html
+
 def fetch_html(url):
+    # 詳細ページはrequestsでOK（必要ならPlaywrightでも切替可能）
+    import requests
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
     }
@@ -33,7 +46,7 @@ def fetch_html(url):
         resp = requests.get(url, headers=headers, timeout=20)
         resp.raise_for_status()
         return resp.text
-    except requests.exceptions.RequestException as e:
+    except Exception as e:
         print(f"Error fetching {url}: {e}")
         return None
 
@@ -43,10 +56,10 @@ def parse_listing(html, base_url):
     for dl in soup.select("dl.onlinegirl-dl-big"):
         name_a = dl.select_one("dt.onlinegirl-dt-big h3 a")
         img_tag = dl.select_one("dd.onlinegirl-dd-img-big img")
-        comment_tag = dl.select_one("span.onlinegirl-dd-comment-span-big a")
+        comment_tag = dl.select_one("dd.onlinegirl-dd-name-big span.onlinegirl-dd-comment-span-big a")
         if not (name_a and img_tag):
             continue
-        name = name_a.get_text(strip=True)
+        name = name_a.contents[0].strip() if name_a.contents else name_a.get_text(strip=True)
         url = name_a.get("href", "")
         if url and not url.startswith("http"):
             url = urljoin(base_url, url)
@@ -62,14 +75,12 @@ def parse_listing(html, base_url):
 
 def parse_detail(html):
     soup = BeautifulSoup(html, "html.parser")
-
     def get_dd(label):
         dt = soup.find("dt", string=re.compile(label))
         if not dt:
             return ""
         dd = dt.find_next("dd")
         return dd.get_text(strip=True) if dd else ""
-
     detail = {
         "年齢": get_dd("年齢"),
         "身長": get_dd("身長"),
@@ -90,8 +101,8 @@ def main():
     ws = open_sheet()
     existing = set(ws.col_values(3))  # C列（url）
 
-    print(f"Fetching listing page: {LISTING_URL}")
-    listing_html = fetch_html(LISTING_URL)
+    print(f"Fetching JS-rendered listing page: {LISTING_URL}")
+    listing_html = fetch_listing_with_js(LISTING_URL)
     if not listing_html:
         print("Failed to get listing page. Aborting.")
         return
