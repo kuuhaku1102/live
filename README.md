@@ -32,13 +32,14 @@ Run the scraper with Python:
 ```bash
 python update_sheet.py             # generic scraper
 python scrape_madamlive.py         # scraper for madamlive.tv
+python dmm_scraper.py              # scraper for DMM live chat
 ```
 
-Both scripts read a listing page, fetch each profile's detail page, and append new entries to the configured Google Sheet.
+These scripts read a listing page, fetch each profile's detail page, and append new entries to the configured Google Sheet.
 
 ## GitHub Actions
 
-A workflow in `.github/workflows/update_sheet.yml` can run the generic scraper, while `.github/workflows/scrape_madamlive.yml` runs the madamlive-specific one. To use them, add the following secrets to your repository settings:
+A workflow in `.github/workflows/update_sheet.yml` can run the generic scraper, `.github/workflows/scrape_madamlive.yml` runs the madamlive-specific one, and `.github/workflows/dmm_scraper.yml` runs the DMM scraper. To use them, add the following secrets to your repository settings:
 
 - `GSHEET_JSON` – base64-encoded service account JSON
 - `SPREADSHEET_ID` – ID of the spreadsheet
