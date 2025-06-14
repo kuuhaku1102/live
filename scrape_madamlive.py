@@ -51,6 +51,8 @@ def parse_listing(html, base_url):
         img_tag = dl.select_one("dd.onlinegirl-dd-img-big img")
         if not name_a:
             continue
+        name_a = dl.select_one("dt.onlinegirl-dt-big h3 a")
+        img_tag = dl.select_one("dd.onlinegirl-dd-img-big img")
         comment_tag = dl.select_one("span.onlinegirl-dd-comment-span-big")
         if not (name_a and img_tag):
             continue
@@ -69,6 +71,28 @@ def parse_listing(html, base_url):
             "comment": comment,
         })
 
+    """Parse madamlive listing page."""
+    soup = BeautifulSoup(html, "html.parser")
+    entries = []
+    for a in soup.select("a[href]"):
+        name = a.get_text(strip=True)
+        img_tag = a.find("img")
+        if not name or not img_tag:
+            continue
+        url = a.get("href", "")
+        if url and not url.startswith("http"):
+            url = urljoin(base_url, url)
+        img = urljoin(base_url, img_tag.get("src", ""))
+        comment = ""
+        comment_tag = a.find(class_=re.compile("oneword|comment"))
+        if comment_tag:
+            comment = comment_tag.get_text(strip=True)
+        entries.append({
+            "name": name,
+            "url": url,
+            "image": img,
+            "comment": comment,
+        })
     return entries
 
 
@@ -105,6 +129,36 @@ def parse_detail(html):
         genres = [div.get_text(strip=True) for div in soup.select("dd.genre-list div.genre-div")]
         detail["genre"] = ",".join(genres)
 
+    mapping = {
+        "age": r"年齢",
+        "height": r"身長",
+        "cup": r"(カップ数|スリーサイズ)",
+        "face": r"顔出し",
+        "toy": r"おもちゃ",
+        "appear": r"出没時間",
+        "style": r"(スタイル|体型)",
+        "job": r"職業",
+        "hobby": r"(趣味|マイブーム)",
+        "favor": r"(好みのタイプ|好きな男性のタイプ)",
+        "seikantai": r"性感帯",
+        "genre": r"ジャンル",
+        "age": "年齢",
+        "height": "身長",
+        "cup": "カップ数",
+        "face": "顔出し",
+        "toy": "おもちゃ",
+        "appear": "出没時間",
+        "style": "スタイル",
+        "job": "職業",
+        "hobby": "趣味",
+        "favor": "好みのタイプ",
+        "seikantai": "性感帯",
+        "genre": "ジャンル",
+    }
+
+    detail = {}
+    for key, label in mapping.items():
+        detail[key] = get_dd(label)
     return detail
 
 
