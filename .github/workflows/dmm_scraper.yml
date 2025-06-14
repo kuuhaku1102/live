@@ -23,4 +23,5 @@ jobs:
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           SHEET_NAME: ${{ secrets.SHEET_NAME }}
           LISTING_URL: ${{ secrets.LISTING_URL }}
+          USE_PLAYWRIGHT: 1
         run: python dmm_scraper.py
