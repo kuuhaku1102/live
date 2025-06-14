@@ -3,21 +3,17 @@ import json
 import base64
 import re
 import time
-import random
 from urllib.parse import urljoin
 
 import gspread
 from bs4 import BeautifulSoup
-from playwright.sync_api import sync_playwright
 
-SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "YOUR_SPREADSHEET_ID")
-SHEET_NAME = os.environ.get("SHEET_NAME", "madam")
-LISTING_URL = os.environ.get("LISTING_URL", "https://www.madamlive.tv/listing")
+SPREADSHEET_ID = os.environ["SPREADSHEET_ID"]
+SHEET_NAME = os.environ["SHEET_NAME"]
+LISTING_URL = os.environ["LISTING_URL"]
 
 def get_gspread_client():
-    b64 = os.environ.get("GSHEET_JSON")
-    if not b64:
-        raise ValueError("GSHEET_JSON not set")
+    b64 = os.environ["GSHEET_JSON"]
     data = json.loads(base64.b64decode(b64).decode("utf-8"))
     return gspread.service_account_from_dict(data)
 
@@ -26,10 +22,11 @@ def open_sheet():
     sh = gc.open_by_key(SPREADSHEET_ID)
     return sh.worksheet(SHEET_NAME)
 
-def fetch_listing_with_js(url):
+def fetch_html_playwright(url):
+    from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
-        # ヘッドレスモードOFFで人間らしさを出す＋bot判定回避フラグ
-        browser = p.chromium.launch(headless=False, args=['--disable-blink-features=AutomationControlled'])
+        # Actions上はGUIがないため必ずheadless=True
+        browser = p.chromium.launch(headless=True, args=['--disable-blink-features=AutomationControlled'])
         page = browser.new_page(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
             extra_http_headers={
@@ -39,17 +36,12 @@ def fetch_listing_with_js(url):
         )
         print(f"Navigating to: {url}")
         page.goto(url, timeout=60000, wait_until="networkidle")
-        # 人間らしいランダム待機
-        time.sleep(3 + random.random() * 2)
-        # マウス・キーボードの操作も入れてbot感を減らす
-        page.mouse.move(300, 300)
-        page.keyboard.press("ArrowDown")
-        time.sleep(1 + random.random() * 1)
+        time.sleep(2)
         html = page.content()
         browser.close()
         return html
 
-def fetch_html(url):
+def fetch_html_requests(url):
     import requests
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
@@ -116,7 +108,7 @@ def main():
     existing = set(ws.col_values(3))  # C列（url）
 
     print(f"Fetching JS-rendered listing page: {LISTING_URL}")
-    listing_html = fetch_listing_with_js(LISTING_URL)
+    listing_html = fetch_html_playwright(LISTING_URL)
     if not listing_html:
         print("Failed to get listing page. Aborting.")
         return
@@ -129,7 +121,7 @@ def main():
             continue
 
         print(f"Fetching detail page: {item['url']}")
-        detail_html = fetch_html(item["url"])
+        detail_html = fetch_html_requests(item["url"])
         if not detail_html:
             print(f"Skipping {item['name']} because detail page could not be fetched.")
             continue
@@ -156,7 +148,4 @@ def main():
         ws.append_row(row)
         print(f"Added: {item['name']} - {item['url']}")
 
-        time.sleep(1.5 + random.random())  # 過剰アクセス防止&人間っぽさ
-
-if __name__ == "__main__":
-    main()
+        time.sleep(1.5
