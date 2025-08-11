@@ -139,7 +139,13 @@ def main():
             detail['seikantai'],
             detail['genre'],
         ]
-        ws.append_row(row)
+ # ③ 追記時は必ず A1:P1 をテーブル起点に指定（←これが肝）
+        ws.append_row(
+            row,
+            value_input_option="USER_ENTERED",
+            table_range="A1:P1"   # ★ ここを指定することでW列起点問題を回避
+        )
+        
         print(f"Added: {item['name']} - {item['url']}")
         
         ### 変更点：相手サーバーに配慮し、1.5秒待機する ###
