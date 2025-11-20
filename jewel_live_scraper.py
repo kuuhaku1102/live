@@ -1,0 +1,143 @@
+"""Scraper for the Jewel Live listing page.
+
+This script fetches the listing page for Jewel Live (j-live.tv), extracts
+profile cards, and appends any new entries to a Google Sheet. It is designed
+for eventual expansion to a database pipeline by keeping the parsed record
+structure explicit.
+"""
+
+import base64
+import json
+import os
+import re
+from typing import Dict, List
+from urllib.parse import urljoin
+
+import gspread
+import requests
+from bs4 import BeautifulSoup
+
+SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "YOUR_SPREADSHEET_ID")
+SHEET_NAME = os.environ.get("SHEET_NAME", "jewel_live")
+LISTING_URL = os.environ.get("LISTING_URL", "https://www.j-live.tv/")
+
+
+def get_gspread_client() -> gspread.Client:
+    """Create an authenticated gspread client using base64 JSON credentials."""
+
+    encoded = os.environ.get("GSHEET_JSON")
+    if not encoded:
+        raise ValueError("GSHEET_JSON not set")
+
+    credentials = json.loads(base64.b64decode(encoded).decode("utf-8"))
+    return gspread.service_account_from_dict(credentials)
+
+
+def open_sheet() -> gspread.Worksheet:
+    """Open the configured worksheet within the target spreadsheet."""
+
+    client = get_gspread_client()
+    spreadsheet = client.open_by_key(SPREADSHEET_ID)
+    return spreadsheet.worksheet(SHEET_NAME)
+
+
+def fetch_html(url: str) -> str:
+    """Fetch HTML with a desktop-like User-Agent and a short timeout."""
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36"
+        )
+    }
+    response = requests.get(url, headers=headers, timeout=20)
+    response.raise_for_status()
+    return response.text
+
+
+def extract_background_image(style: str, base_url: str) -> str:
+    """Extract a background-image URL from an inline style and absolutize it."""
+
+    match = re.search(r"url\((.*?)\)", style or "")
+    if not match:
+        return ""
+    image_url = match.group(1).strip("'\"")
+    return urljoin(base_url, image_url)
+
+
+def parse_listing(html: str, base_url: str) -> List[Dict[str, str]]:
+    """Parse the Jewel Live listing page into a list of profile dictionaries."""
+
+    soup = BeautifulSoup(html, "html.parser")
+    entries: List[Dict[str, str]] = []
+
+    for card in soup.select("li.online-girl.party"):
+        anchor = card.find("a", href=True)
+        if not anchor:
+            continue
+
+        profile_url = urljoin(base_url, anchor["href"])
+        name_tag = anchor.select_one("li.nick_name h3 b")
+        name = name_tag.get_text(strip=True) if name_tag else ""
+
+        comment_tag = anchor.select_one("li.taiki_comment")
+        comment = comment_tag.get_text(strip=True) if comment_tag else ""
+
+        image_span = anchor.select_one("li.image span[style]")
+        image_url = extract_background_image(
+            image_span["style"] if image_span else "", base_url
+        )
+
+        viewers_tag = anchor.select_one("li.shityo span")
+        viewers = viewers_tag.get_text(strip=True) if viewers_tag else ""
+
+        event_tag = anchor.select_one("li.newface_str")
+        event_label = event_tag.get_text(strip=True) if event_tag else ""
+
+        entries.append(
+            {
+                "name": name,
+                "image": image_url,
+                "url": profile_url,
+                "comment": comment,
+                "viewers": viewers,
+                "event": event_label,
+            }
+        )
+
+    return entries
+
+
+def main() -> None:
+    worksheet = open_sheet()
+    existing_urls = set(worksheet.col_values(3))  # Column C holds URLs
+
+    print(f"Fetching listing page: {LISTING_URL}")
+    listing_html = fetch_html(LISTING_URL)
+    items = parse_listing(listing_html, LISTING_URL)
+    print(f"Found {len(items)} items on the listing page.")
+
+    for item in items:
+        if item["url"] in existing_urls:
+            continue
+
+        row = [
+            item["name"],
+            item["image"],
+            item["url"],
+            item["comment"],
+            item["viewers"],
+            item["event"],
+        ]
+
+        worksheet.append_row(
+            row,
+            value_input_option="USER_ENTERED",
+            table_range="A1:F1",
+        )
+
+        print(f"Added: {item['name']} - {item['url']}")
+
+
+if __name__ == "__main__":
+    main()
