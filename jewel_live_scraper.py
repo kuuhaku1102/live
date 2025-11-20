@@ -58,8 +58,61 @@ def find_labeled_value(soup: BeautifulSoup, keywords: list[str]) -> str:
 
 
 def parse_detail_page(detail_url: str) -> dict:
+    """Parse detail page-only fields from Jewel Live profiles."""
+
     html = fetch_html(detail_url)
     soup = BeautifulSoup(html, "html.parser")
+
+    fields = {
+        "age": "",
+        "height": "",
+        "cup": "",
+        "face_public": "",
+        "toy": "",
+        "time_slot": "",
+        "style": "",
+        "job": "",
+        "hobby": "",
+        "favorite_type": "",
+        "erogenous_zone": "",
+        "genre_detail": "",
+    }
+
+    label_map = {
+        "age": ["年齢", "歳", "才"],
+        "height": ["身長", "cm"],
+        "cup": ["カップ", "バスト"],
+        "face_public": ["顔出し", "顔", "公開"],
+        "toy": ["おもちゃ"],
+        "time_slot": ["出没時間", "時間"],
+        "style": ["スタイル"],
+        "job": ["職業"],
+        "hobby": ["趣味"],
+        "favorite_type": ["好みのタイプ", "好きなタイプ"],
+        "erogenous_zone": ["性感帯"],
+    }
+
+    profile_box = soup.select_one("div.profile-box")
+    if profile_box:
+        for dl in profile_box.select("dl.profile-dl"):
+            dt = dl.find("dt")
+            dd = dl.find("dd")
+            label = text_content(dt)
+            value = text_content(dd)
+            if not label:
+                continue
+
+            for field, keywords in label_map.items():
+                if any(key in label for key in keywords):
+                    fields[field] = value
+                    break
+
+        genre_dd = profile_box.select_one("dd.genre-list")
+        if genre_dd:
+            active_genres = [text_content(div) for div in genre_dd.select("div.genre-div.active")]
+            if not active_genres:
+                active_genres = [text_content(div) for div in genre_dd.select("div.genre-div")]
+            fields["genre_detail"] = ", ".join(filter(None, active_genres))
 
     selectors = {
         "age": ["dd.p-age", "span.age", "li.age", "td.age"],
@@ -75,29 +128,28 @@ def parse_detail_page(detail_url: str) -> dict:
                 return text_content(tag)
         return ""
 
-    age = first_non_empty(
+    fields["age"] = first_non_empty(
+        fields["age"],
         pick_from_selectors("age"),
         find_labeled_value(soup, ["年齢", "歳", "才"]),
     )
-    height = first_non_empty(
+    fields["height"] = first_non_empty(
+        fields["height"],
         pick_from_selectors("height"),
         find_labeled_value(soup, ["身長", "cm"]),
     )
-    cup = first_non_empty(
+    fields["cup"] = first_non_empty(
+        fields["cup"],
         pick_from_selectors("cup"),
         find_labeled_value(soup, ["カップ", "バスト"]),
     )
-    face_public = first_non_empty(
+    fields["face_public"] = first_non_empty(
+        fields["face_public"],
         pick_from_selectors("face_public"),
         find_labeled_value(soup, ["顔出し", "顔", "公開"]),
     )
 
-    return {
-        "age": age,
-        "height": height,
-        "cup": cup,
-        "face_public": face_public,
-    }
+    return fields
 
 
 def post_to_wp(item: dict):
@@ -151,14 +203,14 @@ def scrape_jewel():
             "height": detail_fields.get("height", ""),
             "cup": detail_fields.get("cup", ""),
             "face_public": detail_fields.get("face_public", ""),
-            "toy": "",
-            "time_slot": "",
-            "style": "",
-            "job": "",
-            "hobby": "",
-            "favorite_type": "",
-            "erogenous_zone": "",
-            "genre": "Jewel Live",
+            "toy": detail_fields.get("toy", ""),
+            "time_slot": detail_fields.get("time_slot", ""),
+            "style": detail_fields.get("style", ""),
+            "job": detail_fields.get("job", ""),
+            "hobby": detail_fields.get("hobby", ""),
+            "favorite_type": detail_fields.get("favorite_type", ""),
+            "erogenous_zone": detail_fields.get("erogenous_zone", ""),
+            "genre": first_non_empty(detail_fields.get("genre_detail", ""), "Jewel Live"),
         }
 
         items.append(item)
