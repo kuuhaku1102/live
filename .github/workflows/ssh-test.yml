@@ -14,31 +14,36 @@ jobs:
           SSH_PORT: ${{ secrets.SSH_PORT }}
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_USER: ${{ secrets.SSH_USER }}
-          DB_HOST: ${{ secrets.DB_HOST }}
-          DB_PORT: ${{ secrets.DB_PORT }}
         run: |
           mkdir -p ~/.ssh
           printf "%s" "$SSH_PRIVATE_KEY" > ~/.ssh/id_live
           chmod 600 ~/.ssh/id_live
+
           ssh-keyscan -T 10 -p ${SSH_PORT:-22} ${SSH_HOST} >> ~/.ssh/known_hosts
 
+          # 🔥 ConoHa MySQL に接続するには内部IPへフォワードする必要がある
+          #    mysql1023.conoha.ne.jp → 172.22.44.179（内部専用）
           ssh -i ~/.ssh/id_live \
             -o StrictHostKeyChecking=no \
             -o ExitOnForwardFailure=yes \
             -o ServerAliveInterval=60 \
             -o ServerAliveCountMax=3 \
             -fN \
-            -L 3307:${DB_HOST}:${DB_PORT:-3306} \
+            -L 3307:172.22.44.179:3306 \
             ${SSH_USER}@${SSH_HOST} -p ${SSH_PORT}
 
       - name: Verify tunnel
         run: ss -lntp
 
       - name: Test MySQL connection
+        env:
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_NAME: ${{ secrets.DB_NAME }}
         run: |
-          mysql -u "${{ secrets.DB_USER }}" \
-                -p"${{ secrets.DB_PASSWORD }}" \
+          mysql -u "${DB_USER}" \
+                -p"${DB_PASSWORD}" \
                 -h 127.0.0.1 \
                 -P 3307 \
-                ${{ secrets.DB_NAME }} \
+                "${DB_NAME}" \
                 -e "SHOW TABLES;"
