@@ -18,11 +18,8 @@ jobs:
           DB_PORT: ${{ secrets.DB_PORT }}
         run: |
           mkdir -p ~/.ssh
-
-          # 改行を壊さず秘密鍵書き込み
           printf "%s" "$SSH_PRIVATE_KEY" > ~/.ssh/id_live
           chmod 600 ~/.ssh/id_live
-
           ssh-keyscan -T 10 -p ${SSH_PORT:-22} ${SSH_HOST} >> ~/.ssh/known_hosts
 
           ssh -i ~/.ssh/id_live \
@@ -36,3 +33,12 @@ jobs:
 
       - name: Verify tunnel
         run: ss -lntp
+
+      - name: Test MySQL connection
+        run: |
+          mysql -u "${{ secrets.DB_USER }}" \
+                -p"${{ secrets.DB_PASSWORD }}" \
+                -h 127.0.0.1 \
+                -P 3307 \
+                ${{ secrets.DB_NAME }} \
+                -e "SHOW TABLES;"
