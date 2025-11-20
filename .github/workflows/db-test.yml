@@ -1,0 +1,23 @@
+name: DB Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-db:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Setup SSH key
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_live
+        chmod 600 ~/.ssh/id_live
+        ssh-keyscan -p ${{ secrets.SSH_PORT }} ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+
+    - name: Run MySQL test command
+      run: |
+        ssh -i ~/.ssh/id_live \
+          -p ${{ secrets.SSH_PORT }} \
+          ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
+          "mysql -u ${{ secrets.DB_USER }} -p'${{ secrets.DB_PASSWORD }}' -h ${{ secrets.DB_HOST }} ${{ secrets.DB_NAME }} -e 'SHOW TABLES;'"
