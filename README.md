@@ -35,13 +35,14 @@ Run the scraper with Python:
 python update_sheet.py             # generic scraper
 python scrape_madamlive.py         # scraper for madamlive.tv
 python dmm_scraper.py              # scraper for DMM live chat
+python jewel_live_scraper.py       # scraper for Jewel Live (j-live.tv)
 ```
 
 These scripts read a listing page, fetch each profile's detail page, and append new entries to the configured Google Sheet.
 
 ## GitHub Actions
 
-A workflow in `.github/workflows/update_sheet.yml` can run the generic scraper, `.github/workflows/scrape_madamlive.yml` runs the madamlive-specific one, and `.github/workflows/dmm_scraper.yml` runs the DMM scraper. To use them, add the following secrets to your repository settings:
+A workflow in `.github/workflows/update_sheet.yml` can run the generic scraper, `.github/workflows/scrape_madamlive.yml` runs the madamlive-specific one, `.github/workflows/dmm_scraper.yml` runs the DMM scraper, and `.github/workflows/jewel_live.yml` runs the Jewel Live scraper. To use them, add the following secrets to your repository settings:
 
 - `GSHEET_JSON` – base64-encoded service account JSON
 - `SPREADSHEET_ID` – ID of the spreadsheet
