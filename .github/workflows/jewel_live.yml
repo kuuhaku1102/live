@@ -31,7 +31,7 @@ jobs:
           chmod 600 ~/.ssh/id_live
           ssh-keyscan -p ${SSH_PORT:-22} ${SSH_HOST} >> ~/.ssh/known_hosts
           # Forward local port 3307 to the remote database host
-          ssh -fN -L 3307:${DB_HOST}:${DB_PORT:-3306} -p ${SSH_PORT:-22} ${SSH_USER}@${SSH_HOST}
+          ssh -i ~/.ssh/id_live -fN -L 3307:${DB_HOST}:${DB_PORT:-3306} -p ${SSH_PORT:-22} ${SSH_USER}@${SSH_HOST}
       - name: Run Jewel Live scraper
         env:
           GSHEET_JSON: ${{ secrets.GSHEET_JSON }}
