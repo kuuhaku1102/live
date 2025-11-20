@@ -1,30 +1,38 @@
-- name: Setup SSH tunnel to database
-  env:
-    SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-    SSH_PORT: ${{ secrets.SSH_PORT }}
-    SSH_HOST: ${{ secrets.SSH_HOST }}
-    SSH_USER: ${{ secrets.SSH_USER }}
-    DB_HOST: ${{ secrets.DB_HOST }}
-    DB_PORT: ${{ secrets.DB_PORT }}
-  run: |
-    mkdir -p ~/.ssh
+name: SSH Test
 
-    # 改行を壊さず秘密鍵を書き込む（必須）
-    printf "%s" "$SSH_PRIVATE_KEY" > ~/.ssh/id_live
-    chmod 600 ~/.ssh/id_live
+on:
+  workflow_dispatch:
 
-    # known_hosts に登録
-    ssh-keyscan -T 10 -p ${SSH_PORT:-22} ${SSH_HOST} >> ~/.ssh/known_hosts
+jobs:
+  ssh-test:
+    runs-on: ubuntu-latest
 
-    # ポートフォワード（成功しなければ即エラー）
-    ssh -i ~/.ssh/id_live \
-      -o StrictHostKeyChecking=no \
-      -o ExitOnForwardFailure=yes \
-      -o ServerAliveInterval=60 \
-      -o ServerAliveCountMax=3 \
-      -fN \
-      -L 3307:${DB_HOST}:${DB_PORT:-3306} \
-      ${SSH_USER}@${SSH_HOST} -p ${SSH_PORT}
+    steps:
+      - name: Setup SSH tunnel to database
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+        run: |
+          mkdir -p ~/.ssh
 
-- name: Verify tunnel
-  run: ss -lntp
+          # 改行を壊さず秘密鍵書き込み
+          printf "%s" "$SSH_PRIVATE_KEY" > ~/.ssh/id_live
+          chmod 600 ~/.ssh/id_live
+
+          ssh-keyscan -T 10 -p ${SSH_PORT:-22} ${SSH_HOST} >> ~/.ssh/known_hosts
+
+          ssh -i ~/.ssh/id_live \
+            -o StrictHostKeyChecking=no \
+            -o ExitOnForwardFailure=yes \
+            -o ServerAliveInterval=60 \
+            -o ServerAliveCountMax=3 \
+            -fN \
+            -L 3307:${DB_HOST}:${DB_PORT:-3306} \
+            ${SSH_USER}@${SSH_HOST} -p ${SSH_PORT}
+
+      - name: Verify tunnel
+        run: ss -lntp
