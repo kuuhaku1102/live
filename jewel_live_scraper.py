@@ -16,8 +16,25 @@ DEFAULT_HEADERS = {
 }
 
 
+def make_session() -> requests.Session:
+    """Create a session that optionally ignores proxy env vars.
+
+    GitHub-hosted runners sometimes inject proxy settings that block access to
+    j-live.tv (e.g., 403 tunnel errors). Set J_LIVE_TRUST_ENV_PROXIES=1 when
+    you *do* want to inherit HTTP(S)_PROXY. Otherwise proxies are ignored.
+    """
+
+    session = requests.Session()
+    trust_env = os.environ.get("J_LIVE_TRUST_ENV_PROXIES", "0") not in {"0", "false", "False", ""}
+    session.trust_env = trust_env
+    if not trust_env:
+        session.proxies = {}
+    return session
+
+
 def fetch_html(url: str) -> str:
-    resp = requests.get(url, headers=DEFAULT_HEADERS, timeout=20)
+    session = make_session()
+    resp = session.get(url, headers=DEFAULT_HEADERS, timeout=20)
     resp.raise_for_status()
     return resp.text
 
@@ -167,7 +184,7 @@ def extract_background_image(style: str, base_url: str) -> str:
 
 
 def scrape_jewel():
-    base_url = "https://www.j-live.tv/"
+    base_url = os.environ.get("J_LIVE_BASE_URL", "https://www.j-live.tv/")
     html = fetch_html(base_url)
     soup = BeautifulSoup(html, "html.parser")
 
