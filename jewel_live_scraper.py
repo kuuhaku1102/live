@@ -10,12 +10,14 @@ import base64
 import json
 import os
 import re
-from typing import Dict, List
+from typing import Dict, List, Optional
 from urllib.parse import urljoin
 
 import gspread
+import mysql.connector
 import requests
 from bs4 import BeautifulSoup
+from mysql.connector import Error as MySQLError
 
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "YOUR_SPREADSHEET_ID")
 SHEET_NAME = os.environ.get("SHEET_NAME", "jewel_live")
@@ -39,6 +41,112 @@ def open_sheet() -> gspread.Worksheet:
     client = get_gspread_client()
     spreadsheet = client.open_by_key(SPREADSHEET_ID)
     return spreadsheet.worksheet(SHEET_NAME)
+
+
+def get_db_connection() -> Optional[mysql.connector.MySQLConnection]:
+    """Create a MySQL connection if DB settings are provided."""
+
+    host = os.environ.get("DB_HOST")
+    user = os.environ.get("DB_USER")
+    password = os.environ.get("DB_PASSWORD")
+    database = os.environ.get("DB_NAME")
+    port = int(os.environ.get("DB_PORT", "3306"))
+
+    if not host:
+        print("DB_HOST not set; skipping database write.")
+        return None
+
+    missing = [
+        name
+        for name, value in {
+            "DB_USER": user,
+            "DB_PASSWORD": password,
+            "DB_NAME": database,
+        }.items()
+        if not value
+    ]
+
+    if missing:
+        raise ValueError(f"Missing required database settings: {', '.join(missing)}")
+
+    try:
+        connection = mysql.connector.connect(
+            host=host,
+            user=user,
+            password=password,
+            database=database,
+            port=port,
+            charset="utf8mb4",
+            autocommit=False,
+        )
+    except MySQLError as exc:
+        raise RuntimeError(f"Failed to connect to MySQL: {exc}") from exc
+
+    print(f"Connected to MySQL at {host}:{port}/{database}")
+    return connection
+
+
+def ensure_table(cursor) -> None:
+    """Ensure the Jewel Live table exists with a unique URL column."""
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS jewel_live_profiles (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(255) DEFAULT '',
+            image TEXT,
+            url VARCHAR(512) NOT NULL UNIQUE,
+            comment TEXT,
+            viewers VARCHAR(50) DEFAULT '',
+            event VARCHAR(255) DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """
+    )
+
+
+def write_profiles_to_db(
+    connection: Optional[mysql.connector.MySQLConnection],
+    profiles: List[Dict[str, str]],
+) -> None:
+    """Insert or update profile rows in MySQL when a connection is provided."""
+
+    if not connection:
+        return
+
+    cursor = connection.cursor()
+    ensure_table(cursor)
+
+    insert_sql = (
+        """
+        INSERT INTO jewel_live_profiles (name, image, url, comment, viewers, event)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            name = VALUES(name),
+            image = VALUES(image),
+            comment = VALUES(comment),
+            viewers = VALUES(viewers),
+            event = VALUES(event);
+        """
+    )
+
+    data = [
+        (
+            item["name"],
+            item["image"],
+            item["url"],
+            item["comment"],
+            item["viewers"],
+            item["event"],
+        )
+        for item in profiles
+    ]
+
+    cursor.executemany(insert_sql, data)
+    connection.commit()
+    print(f"Upserted {cursor.rowcount} rows into jewel_live_profiles.")
+    cursor.close()
 
 
 def fetch_html(url: str) -> str:
@@ -111,6 +219,7 @@ def parse_listing(html: str, base_url: str) -> List[Dict[str, str]]:
 def main() -> None:
     worksheet = open_sheet()
     existing_urls = set(worksheet.col_values(3))  # Column C holds URLs
+    db_connection = get_db_connection()
 
     print(f"Fetching listing page: {LISTING_URL}")
     listing_html = fetch_html(LISTING_URL)
@@ -137,6 +246,12 @@ def main() -> None:
         )
 
         print(f"Added: {item['name']} - {item['url']}")
+
+    write_profiles_to_db(db_connection, items)
+
+    if db_connection:
+        db_connection.close()
+        print("Closed database connection.")
 
 
 if __name__ == "__main__":
