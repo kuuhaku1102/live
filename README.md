@@ -26,6 +26,16 @@ This repository contains a scraper that extracts profile data from a listing pag
    # Set USE_PLAYWRIGHT=0 to disable JavaScript rendering with Playwright
    export USE_PLAYWRIGHT=1
    ```
+5. (Optional) To also persist Jewel Live results to MySQL, provide the database
+   connection settings. When these are present, the scraper will upsert data
+   into a `jewel_live_profiles` table, creating it if needed.
+   ```bash
+   export DB_HOST=127.0.0.1
+   export DB_PORT=3306
+   export DB_USER=username
+   export DB_PASSWORD=secret
+   export DB_NAME=live
+   ```
 
 ## Running
 
@@ -48,5 +58,7 @@ A workflow in `.github/workflows/update_sheet.yml` can run the generic scraper, 
 - `SPREADSHEET_ID` – ID of the spreadsheet
 - `SHEET_NAME` – name of the worksheet (e.g. `live`)
 - `LISTING_URL` – listing page URL to scrape
+- `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` – database settings
+- `SSH_HOST`, `SSH_PORT`, `SSH_USER`, `SSH_PRIVATE_KEY` – SSH tunneling settings for database access
 
 Ensure GitHub Actions are enabled for your repository or configure a self-hosted runner.
