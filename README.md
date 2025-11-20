@@ -50,6 +50,12 @@ python jewel_live_scraper.py       # scraper for Jewel Live (j-live.tv)
 
 These scripts read a listing page, fetch each profile's detail page, and append new entries to the configured Google Sheet.
 
+### Jewel Live scraper options
+
+- `J_LIVE_BASE_URL` – override the base URL (defaults to `https://www.j-live.tv/`).
+- `J_LIVE_TRUST_ENV_PROXIES` – set to `1` to allow `HTTP(S)_PROXY` values; by
+  default proxies are ignored to avoid CI runner blocks when reaching j-live.tv.
+
 ## GitHub Actions
 
 A workflow in `.github/workflows/update_sheet.yml` can run the generic scraper, `.github/workflows/scrape_madamlive.yml` runs the madamlive-specific one, `.github/workflows/dmm_scraper.yml` runs the DMM scraper, and `.github/workflows/jewel_live.yml` runs the Jewel Live scraper. To use them, add the following secrets to your repository settings:
