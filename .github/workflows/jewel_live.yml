@@ -1,63 +1,30 @@
-name: Scrape Jewel Live
+name: Scrape Live Chat
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: '0 */2 * * *'
+    - cron: "0 */2 * * *"   # 2時間ごと
+  workflow_dispatch:
 
 jobs:
-  run:
+  scrape:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Setup SSH tunnel to database
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-          SSH_PORT: ${{ secrets.SSH_PORT }}
-          SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_USER: ${{ secrets.SSH_USER }}
-          DB_HOST: ${{ secrets.DB_HOST }}
-          DB_PORT: ${{ secrets.DB_PORT }}
-        run: |
-          mkdir -p ~/.ssh
-
-          # 秘密鍵ファイル作成
-          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_live
-          chmod 600 ~/.ssh/id_live
-
-          # known_hosts に登録
-          ssh-keyscan -T 10 -p ${SSH_PORT:-22} ${SSH_HOST} >> ~/.ssh/known_hosts
-
-          # DBポートフォワード
-          ssh -i ~/.ssh/id_live \
-            -o StrictHostKeyChecking=no \
-            -fN \
-            -L 3307:${DB_HOST}:${DB_PORT:-3306} \
-            -p ${SSH_PORT:-22} \
-            ${SSH_USER}@${SSH_HOST}
+          pip install requests beautifulsoup4
 
       - name: Run Jewel Live scraper
         env:
-          GSHEET_JSON: ${{ secrets.GSHEET_JSON }}
-          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
-          SHEET_NAME: ${{ secrets.SHEET_NAME }}
-          LISTING_URL: ${{ secrets.LISTING_URL }}
-
-          # DB はローカルに転送済み
-          DB_HOST: 127.0.0.1
-          DB_PORT: 3307
-          DB_USER: ${{ secrets.DB_USER }}
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          DB_NAME: ${{ secrets.DB_NAME }}
-        run: python jewel_live_scraper.py
+          API_KEY: ${{ secrets.API_KEY }}
+          API_URL: ${{ secrets.API_URL }}
+        run: |
+          python3 scraper.py
