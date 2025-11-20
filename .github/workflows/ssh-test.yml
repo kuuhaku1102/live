@@ -8,12 +8,15 @@
     DB_PORT: ${{ secrets.DB_PORT }}
   run: |
     mkdir -p ~/.ssh
-    echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_live
+
+    # 改行を壊さず秘密鍵を書き込む（必須）
+    printf "%s" "$SSH_PRIVATE_KEY" > ~/.ssh/id_live
     chmod 600 ~/.ssh/id_live
 
-    ssh-keyscan -p ${SSH_PORT:-22} ${SSH_HOST} >> ~/.ssh/known_hosts
+    # known_hosts に登録
+    ssh-keyscan -T 10 -p ${SSH_PORT:-22} ${SSH_HOST} >> ~/.ssh/known_hosts
 
-    # ポートフォワード（成功しなかったら即エラー）
+    # ポートフォワード（成功しなければ即エラー）
     ssh -i ~/.ssh/id_live \
       -o StrictHostKeyChecking=no \
       -o ExitOnForwardFailure=yes \
