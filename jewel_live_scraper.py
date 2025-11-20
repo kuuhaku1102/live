@@ -1,9 +1,8 @@
-"""Scraper for the Jewel Live listing page.
+"""Scraper for the Jewel Live listing page (ConoHa internal execution version).
 
-This script fetches the listing page for Jewel Live (j-live.tv), extracts
-profile cards, and appends any new entries to a Google Sheet. It is designed
-for eventual expansion to a database pipeline by keeping the parsed record
-structure explicit.
+Runs inside the ConoHa web server via SSH.
+Directly connects to internal MySQL (mysql1023.conoha.ne.jp or 172.22.44.179),
+no SSH tunnel or external DB access needed.
 """
 
 import base64
@@ -19,14 +18,19 @@ import requests
 from bs4 import BeautifulSoup
 from mysql.connector import Error as MySQLError
 
-SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "YOUR_SPREADSHEET_ID")
+
+# ----------------------------------------------------------------------
+# Google Sheets settings (these still come from GitHub Actions secrets)
+# ----------------------------------------------------------------------
+SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "")
 SHEET_NAME = os.environ.get("SHEET_NAME", "jewel_live")
 LISTING_URL = os.environ.get("LISTING_URL", "https://www.j-live.tv/")
 
 
+# ----------------------------------------------------------------------
+# Google Sheets setup
+# ----------------------------------------------------------------------
 def get_gspread_client() -> gspread.Client:
-    """Create an authenticated gspread client using base64 JSON credentials."""
-
     encoded = os.environ.get("GSHEET_JSON")
     if not encoded:
         raise ValueError("GSHEET_JSON not set")
@@ -36,41 +40,26 @@ def get_gspread_client() -> gspread.Client:
 
 
 def open_sheet() -> gspread.Worksheet:
-    """Open the configured worksheet within the target spreadsheet."""
-
     client = get_gspread_client()
     spreadsheet = client.open_by_key(SPREADSHEET_ID)
     return spreadsheet.worksheet(SHEET_NAME)
 
 
+# ----------------------------------------------------------------------
+# ConoHa Internal MySQL Connection
+# ----------------------------------------------------------------------
 def get_db_connection() -> Optional[mysql.connector.MySQLConnection]:
-    """Create a MySQL connection if DB settings are provided."""
+    """MySQL for ConoHa internal network (no external access)."""
 
-    host = os.environ.get("DB_HOST")
-    user = os.environ.get("DB_USER")
-    password = os.environ.get("DB_PASSWORD")
-    database = os.environ.get("DB_NAME")
-    port = int(os.environ.get("DB_PORT", "3306"))
-
-    if not host:
-        print("DB_HOST not set; skipping database write.")
-        return None
-
-    missing = [
-        name
-        for name, value in {
-            "DB_USER": user,
-            "DB_PASSWORD": password,
-            "DB_NAME": database,
-        }.items()
-        if not value
-    ]
-
-    if missing:
-        raise ValueError(f"Missing required database settings: {', '.join(missing)}")
+    host = "mysql1023.conoha.ne.jp"  # internal ConoHa DB host
+    # host = "172.22.44.179"          # internal IP (optional)
+    user = "jqabp_435b583x"
+    password = "admin1116@"
+    database = "jqabp_8btdu8jt"
+    port = 3306
 
     try:
-        connection = mysql.connector.connect(
+        conn = mysql.connector.connect(
             host=host,
             user=user,
             password=password,
@@ -80,15 +69,16 @@ def get_db_connection() -> Optional[mysql.connector.MySQLConnection]:
             autocommit=False,
         )
     except MySQLError as exc:
-        raise RuntimeError(f"Failed to connect to MySQL: {exc}") from exc
+        raise RuntimeError(f"FAILED to connect to MySQL internal network: {exc}")
 
-    print(f"Connected to MySQL at {host}:{port}/{database}")
-    return connection
+    print(f"[OK] Connected to internal MySQL → {host}:{port}")
+    return conn
 
 
+# ----------------------------------------------------------------------
+# Database table creation and upsert
+# ----------------------------------------------------------------------
 def ensure_table(cursor) -> None:
-    """Ensure the Jewel Live table exists with a unique URL column."""
-
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS jewel_live_profiles (
@@ -100,26 +90,21 @@ def ensure_table(cursor) -> None:
             viewers VARCHAR(50) DEFAULT '',
             event VARCHAR(255) DEFAULT '',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP 
+                ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """
     )
 
 
-def write_profiles_to_db(
-    connection: Optional[mysql.connector.MySQLConnection],
-    profiles: List[Dict[str, str]],
-) -> None:
-    """Insert or update profile rows in MySQL when a connection is provided."""
-
+def write_profiles_to_db(connection, profiles: List[Dict[str, str]]) -> None:
     if not connection:
         return
 
     cursor = connection.cursor()
     ensure_table(cursor)
 
-    insert_sql = (
-        """
+    sql = """
         INSERT INTO jewel_live_profiles (name, image, url, comment, viewers, event)
         VALUES (%s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
@@ -128,130 +113,115 @@ def write_profiles_to_db(
             comment = VALUES(comment),
             viewers = VALUES(viewers),
             event = VALUES(event);
-        """
-    )
+    """
 
-    data = [
-        (
-            item["name"],
-            item["image"],
-            item["url"],
-            item["comment"],
-            item["viewers"],
-            item["event"],
-        )
-        for item in profiles
+    values = [
+        (p["name"], p["image"], p["url"], p["comment"], p["viewers"], p["event"])
+        for p in profiles
     ]
 
-    cursor.executemany(insert_sql, data)
+    cursor.executemany(sql, values)
     connection.commit()
-    print(f"Upserted {cursor.rowcount} rows into jewel_live_profiles.")
+
+    print(f"[DB] Upserted {cursor.rowcount} rows.")
     cursor.close()
 
 
+# ----------------------------------------------------------------------
+# Scraping
+# ----------------------------------------------------------------------
 def fetch_html(url: str) -> str:
-    """Fetch HTML with a desktop-like User-Agent and a short timeout."""
-
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36"
         )
     }
-    response = requests.get(url, headers=headers, timeout=20)
-    response.raise_for_status()
-    return response.text
+    r = requests.get(url, headers=headers, timeout=20)
+    r.raise_for_status()
+    return r.text
 
 
 def extract_background_image(style: str, base_url: str) -> str:
-    """Extract a background-image URL from an inline style and absolutize it."""
-
     match = re.search(r"url\((.*?)\)", style or "")
     if not match:
         return ""
-    image_url = match.group(1).strip("'\"")
-    return urljoin(base_url, image_url)
+    img = match.group(1).strip("'\"")
+    return urljoin(base_url, img)
 
 
 def parse_listing(html: str, base_url: str) -> List[Dict[str, str]]:
-    """Parse the Jewel Live listing page into a list of profile dictionaries."""
-
     soup = BeautifulSoup(html, "html.parser")
-    entries: List[Dict[str, str]] = []
+    entries = []
 
     for card in soup.select("li.online-girl.party"):
-        anchor = card.find("a", href=True)
-        if not anchor:
+        a = card.find("a", href=True)
+        if not a:
             continue
 
-        profile_url = urljoin(base_url, anchor["href"])
-        name_tag = anchor.select_one("li.nick_name h3 b")
-        name = name_tag.get_text(strip=True) if name_tag else ""
-
-        comment_tag = anchor.select_one("li.taiki_comment")
-        comment = comment_tag.get_text(strip=True) if comment_tag else ""
-
-        image_span = anchor.select_one("li.image span[style]")
-        image_url = extract_background_image(
-            image_span["style"] if image_span else "", base_url
-        )
-
-        viewers_tag = anchor.select_one("li.shityo span")
-        viewers = viewers_tag.get_text(strip=True) if viewers_tag else ""
-
-        event_tag = anchor.select_one("li.newface_str")
-        event_label = event_tag.get_text(strip=True) if event_tag else ""
+        profile_url = urljoin(base_url, a["href"])
+        name_tag = a.select_one("li.nick_name h3 b")
+        comment_tag = a.select_one("li.taiki_comment")
+        image_span = a.select_one("li.image span[style]")
+        viewers_tag = a.select_one("li.shityo span")
+        event_tag = a.select_one("li.newface_str")
 
         entries.append(
             {
-                "name": name,
-                "image": image_url,
+                "name": name_tag.get_text(strip=True) if name_tag else "",
+                "image": extract_background_image(
+                    image_span["style"] if image_span else "", base_url
+                ),
                 "url": profile_url,
-                "comment": comment,
-                "viewers": viewers,
-                "event": event_label,
+                "comment": comment_tag.get_text(strip=True) if comment_tag else "",
+                "viewers": viewers_tag.get_text(strip=True) if viewers_tag else "",
+                "event": event_tag.get_text(strip=True) if event_tag else "",
             }
         )
 
     return entries
 
 
+# ----------------------------------------------------------------------
+# Main
+# ----------------------------------------------------------------------
 def main() -> None:
-    worksheet = open_sheet()
-    existing_urls = set(worksheet.col_values(3))  # Column C holds URLs
-    db_connection = get_db_connection()
+    print("[INFO] Opening Google Sheet...")
+    sheet = open_sheet()
+    existing_urls = set(sheet.col_values(3))  # Column C
 
-    print(f"Fetching listing page: {LISTING_URL}")
-    listing_html = fetch_html(LISTING_URL)
-    items = parse_listing(listing_html, LISTING_URL)
-    print(f"Found {len(items)} items on the listing page.")
+    print("[INFO] Connecting internal MySQL...")
+    conn = get_db_connection()
 
-    for item in items:
-        if item["url"] in existing_urls:
-            continue
+    print(f"[INFO] Fetching: {LISTING_URL}")
+    html = fetch_html(LISTING_URL)
+    profiles = parse_listing(html, LISTING_URL)
+    print(f"[INFO] Parsed {len(profiles)} profiles.")
 
-        row = [
-            item["name"],
-            item["image"],
-            item["url"],
-            item["comment"],
-            item["viewers"],
-            item["event"],
-        ]
+    # Insert into Google Sheets
+    for p in profiles:
+        if p["url"] not in existing_urls:
+            row = [
+                p["name"],
+                p["image"],
+                p["url"],
+                p["comment"],
+                p["viewers"],
+                p["event"],
+            ]
+            sheet.append_row(
+                row,
+                value_input_option="USER_ENTERED",
+                table_range="A1:F1",
+            )
+            print(f"[SHEET] Added → {p['name']}")
 
-        worksheet.append_row(
-            row,
-            value_input_option="USER_ENTERED",
-            table_range="A1:F1",
-        )
+    # Insert into database
+    write_profiles_to_db(conn, profiles)
 
-        print(f"Added: {item['name']} - {item['url']}")
-
-    write_profiles_to_db(db_connection, items)
-
-    if db_connection:
-        db_connection.close()
-        print("Closed database connection.")
+    if conn:
+        conn.close()
+        print("[OK] MySQL closed.")
 
 
 if __name__ == "__main__":
