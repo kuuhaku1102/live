@@ -244,6 +244,35 @@ def extract_card_info(card, base_url: str) -> dict:
     }
 
 
+def fill_missing_with_hyphen(item: dict) -> dict:
+    """Ensure all expected fields are populated with '-' when missing."""
+
+    keys = [
+        "name",
+        "samune",
+        "oneword",
+        "age",
+        "height",
+        "cup",
+        "face_public",
+        "toy",
+        "time_slot",
+        "style",
+        "job",
+        "hobby",
+        "favorite_type",
+        "erogenous_zone",
+        "genre",
+    ]
+
+    for key in keys:
+        value = item.get(key, "")
+        if value is None or (isinstance(value, str) and not value.strip()):
+            item[key] = "-"
+
+    return item
+
+
 def scrape_angel():
     env_base_url = os.environ.get("ANGEL_LIVE_BASE_URL", "https://www.angel-live.com/home/")
     base_url = env_base_url.strip() or "https://www.angel-live.com/home/"
@@ -289,6 +318,8 @@ def scrape_angel():
             "erogenous_zone": detail_fields.get("erogenous_zone", ""),
             "genre": first_non_empty(detail_fields.get("genre_detail", ""), "Angel Live"),
         }
+
+        fill_missing_with_hyphen(item)
 
         items.append(item)
 
