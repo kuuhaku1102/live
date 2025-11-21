@@ -1,0 +1,32 @@
+name: Scrape Madam Live
+
+on:
+  schedule:
+    - cron: "0 */2 * * *"
+  workflow_dispatch:
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run scraper
+        env:
+          API_KEY: ${{ secrets.API_KEY }}
+          API_URL: ${{ secrets.API_URL }}
+          MADAM_LIVE_BASE_URL: ${{ secrets.MADAM_LIVE_BASE_URL }}
+          MADAM_LIVE_TRUST_ENV_PROXIES: ${{ secrets.MADAM_LIVE_TRUST_ENV_PROXIES }}
+        run: |
+          python3 madam_live_scraper.py
