@@ -1,6 +1,7 @@
 import os
 import re
 from urllib.parse import urljoin
+
 import requests
 from requests import RequestException
 from bs4 import BeautifulSoup
@@ -8,11 +9,16 @@ from bs4 import BeautifulSoup
 API_URL = os.environ.get("API_URL")
 API_KEY = os.environ.get("API_KEY")
 
+# -------------------------------------------
+# Chatpia は UA + Referer + Cookie がほぼ必須
+# -------------------------------------------
 DEFAULT_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-    )
+    ),
+    "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+    "Referer": "https://www.chatpia.jp/",
 }
 
 
@@ -20,9 +26,20 @@ DEFAULT_HEADERS = {
 # Basic Functions
 # ---------------------------------------------------------
 def make_session() -> requests.Session:
+    """
+    Chatpia 対策：
+    - 1回目アクセスでCookieセット
+    - 2回目アクセスで一覧HTML取得
+    """
     s = requests.Session()
+    s.headers.update(DEFAULT_HEADERS)
+
+    # GitHub Actions 環境変数で proxy を無効化するか選択
     trust_env = os.environ.get("CHATPIA_TRUST_ENV_PROXIES", "0") not in {
-        "0", "false", "False", "",
+        "0",
+        "false",
+        "False",
+        "",
     }
     s.trust_env = trust_env
     if not trust_env:
@@ -32,7 +49,15 @@ def make_session() -> requests.Session:
 
 def fetch_html(url: str) -> str:
     session = make_session()
-    resp = session.get(url, headers=DEFAULT_HEADERS, timeout=20)
+
+    # 1回目：トップアクセスで Cookie を付ける（失敗しても無視）
+    try:
+        session.get("https://www.chatpia.jp/", timeout=20)
+    except Exception:
+        pass
+
+    # 2回目：本命ページ
+    resp = session.get(url, timeout=25)
     resp.raise_for_status()
 
     if resp.apparent_encoding:
@@ -62,55 +87,60 @@ def extract_age_digits(value: str) -> str:
 def sanitize_profile_name(name: str) -> str:
     if not name:
         return ""
+    # 記号を削除して、名前として使える部分だけ残す
     cleaned = re.sub(r"[^\w\sぁ-ゟ゠-ヿ一-龥々ー０-９Ａ-Ｚａ-ｚー-]+", "", name)
     return cleaned.strip()
 
 
 # ---------------------------------------------------------
-# Chatpia: Extract Card Info
+# Chatpia: 一覧カードから情報取得
 # ---------------------------------------------------------
 def extract_card_info(card, base_url: str) -> dict:
-    # ----------------------
-    # 名前
-    # ----------------------
+    """
+    一覧の1カードから:
+    - name
+    - url
+    - samune（サムネ）
+    - oneword（ひとこと）
+    - age_from_name（年齢）
+    を取り出す
+    """
+    # 名前 + URL
     name_el = card.select_one(".name a")
     raw_name = text_content(name_el)
 
-    # 年齢span削除 → "kiyomi"
-    raw_name = re.sub(r"\(.*?\)", "", raw_name).strip()
+    # (53歳) などの年齢表記を名前から除外
+    raw_name_no_age = re.sub(r"\(.*?\)", "", raw_name).strip()
+    name = sanitize_profile_name(raw_name_no_age)
 
-    name = sanitize_profile_name(raw_name)
-
-    # ----------------------
-    # 詳細URL（必須）
-    # ----------------------
+    # 詳細URL
     detail_url = ""
     if name_el and name_el.has_attr("href"):
         detail_url = urljoin(base_url, name_el["href"])
 
-    # ----------------------
     # サムネ背景画像
-    # ----------------------
     thumb = ""
     pict_el = card.select_one(".pict")
     if pict_el and pict_el.has_attr("style"):
         m = re.search(r"url\((.*?)\)", pict_el["style"])
         if m:
-            thumb = m.group(1).strip("'\"")
+            raw = m.group(1).strip("'\"")
+            # //picture.chatpia.jp/... の場合は https: を補う
+            if raw.startswith("//"):
+                raw = f"https:{raw}"
+            thumb = raw
 
-    # ----------------------
     # ひとこと
-    # ----------------------
     comment_el = card.select_one(".hitokoto, .hitokoto_taiki, .hitokoto_new")
     oneword = text_content(comment_el)
 
-    # ----------------------
-    # 年齢抽出
-    # ----------------------
+    # 年齢（nameブロック内のテキストから数字だけ抜く）
     age_from_name = ""
-    age_match = re.search(r"(\d+)", text_content(card.select_one(".name")))
-    if age_match:
-        age_from_name = age_match.group(1)
+    name_block = card.select_one(".name")
+    if name_block:
+        age_match = re.search(r"(\d+)", text_content(name_block))
+        if age_match:
+            age_from_name = age_match.group(1)
 
     return {
         "name": name or "-",
@@ -122,11 +152,39 @@ def extract_card_info(card, base_url: str) -> dict:
 
 
 # ---------------------------------------------------------
-# Detail Page Parsing（Chatpiaは詳細ページ情報が少ない）
+# Chatpia: プロフィール詳細ページから情報取得
 # ---------------------------------------------------------
 def parse_detail_page(detail_url: str) -> dict:
-    # Chatpiaは詳細の構造がバラバラ → 基本空でOK
-    return {
+    """
+    プロフィール詳細から:
+    - height（身長）
+    - cup（カップ）
+    - job（職業）
+    - hobby（趣味）
+    - favorite_type（男性のタイプ）
+    - time_slot（出没時間）
+    などを取得
+    """
+    if not detail_url:
+        return {
+            "age": "",
+            "height": "",
+            "cup": "",
+            "face_public": "",
+            "toy": "",
+            "time_slot": "",
+            "style": "",
+            "job": "",
+            "hobby": "",
+            "favorite_type": "",
+            "erogenous_zone": "",
+            "genre_detail": "",
+        }
+
+    html = fetch_html(detail_url)
+    soup = BeautifulSoup(html, "html.parser")
+
+    fields = {
         "age": "",
         "height": "",
         "cup": "",
@@ -141,11 +199,59 @@ def parse_detail_page(detail_url: str) -> dict:
         "genre_detail": "",
     }
 
+    # Chatpia 詳細プロフィールは <section class="life-status"> 内
+    section = soup.select_one("section.life-status")
+    if not section:
+        return fields
+
+    # dt: 項目名, dd: 値
+    dts = section.select("dt.life-status-detail__title")
+    dds = section.select("dd.life-status-detail__data")
+
+    for dt, dd in zip(dts, dds):
+        label = text_content(dt)
+        val = text_content(dd)
+
+        if "身長" in label:
+            fields["height"] = val  # 例: "158cm"
+
+        elif "スリーサイズ" in label:
+            # 例: "B(Dカップ) W H" から "Dカップ" を取りたい
+            m = re.search(r"([A-ZＡ-Ｚ])カップ", val)
+            if m:
+                fields["cup"] = f"{m.group(1)}カップ"
+            else:
+                # テキスト全体を一旦入れておく
+                fields["cup"] = val
+
+        elif "職業" in label:
+            fields["job"] = val
+
+        elif "趣味" in label:
+            fields["hobby"] = val
+
+        elif "男性のタイプ" in label:
+            fields["favorite_type"] = val
+
+        elif "出没時間" in label:
+            fields["time_slot"] = val
+
+        # 必要ならここに「性感帯」「スタイル」なども追加でマッピング可能
+
+    # ジャンルは Chatpia 固定でよければこれでOK
+    fields["genre_detail"] = "Chatpia"
+
+    return fields
+
 
 # ---------------------------------------------------------
 # Fallbacks
 # ---------------------------------------------------------
 def fill_with_dash(item: dict) -> dict:
+    """
+    name / samune / oneword / url 以外は "-" で埋めてOKな前提。
+    ここでは全体を一旦 "-" 補完している。
+    """
     for k, v in item.items():
         if v is None or (isinstance(v, str) and not v.strip()):
             item[k] = "-"
@@ -162,34 +268,42 @@ def scrape_chatpia():
     html = fetch_html(base_url)
     soup = BeautifulSoup(html, "html.parser")
 
-    cards = soup.select("div.chatbox_big, div.chatbox_small, div.chatbox-box, div.line")
+    # 一覧のカード候補
+    cards = soup.select("div.chatbox_big, div.chatbox_small")
     if not cards:
-        cards = soup.select("div")
+        # 予備: 何かしら構造が変わった時用
+        cards = soup.select("div.chatbox_big, div.chatbox-box, div.line")
 
-    seen = set()
+    seen_urls = set()
     items = []
 
     for card in cards:
         info = extract_card_info(card, base_url)
 
-        # サムネ or 一言が取れなかったらスキップ（必須）
+        # サムネ & ひとことは必須（あなたの条件）
         if not info["samune"] or not info["oneword"]:
             continue
 
-        # URL必須
+        # URL が不正ならスキップ
         if not info["url"].startswith("http"):
             continue
-        if info["url"] in seen:
+        if info["url"] in seen_urls:
             continue
-        seen.add(info["url"])
+        seen_urls.add(info["url"])
 
-        detail = parse_detail_page(info["url"])
+        # プロフィール詳細ページ解析
+        try:
+            detail = parse_detail_page(info["url"])
+        except Exception as exc:
+            print(f"Detail fetch failed for {info['url']}: {exc}")
+            detail = {}
 
         item = {
             "name": info["name"],
             "samune": info["samune"],
             "url": info["url"],
             "oneword": info["oneword"],
+            # age: 一覧の name ブロック側から取れた値を優先
             "age": extract_age_digits(first_non_empty(detail.get("age", ""), info.get("age_from_name"))) or "-",
             "height": detail.get("height", "") or "-",
             "cup": detail.get("cup", "") or "-",
