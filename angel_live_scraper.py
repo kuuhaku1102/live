@@ -38,11 +38,11 @@ def fetch_html(url: str) -> str:
     resp = session.get(url, headers=DEFAULT_HEADERS, timeout=20)
     resp.raise_for_status()
 
-    # Angel Live pages are often served with Shift_JIS/EUC-JP encodings.
-    # requests may default to ISO-8859-1 when the charset header is missing,
-    # so detect a better encoding to avoid mojibake names/comments.
-    if not resp.encoding or resp.encoding.lower() == "iso-8859-1":
-        resp.encoding = resp.apparent_encoding or "utf-8"
+    # Angel Live pages are often served with legacy Japanese encodings, and the
+    # response header may incorrectly declare UTF-8. Always prefer the detected
+    # encoding to avoid mojibake in names/comments before parsing.
+    if resp.apparent_encoding:
+        resp.encoding = resp.apparent_encoding
 
     return resp.text
 
