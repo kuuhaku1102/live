@@ -67,74 +67,66 @@ def sanitize_profile_name(name: str) -> str:
 
 
 # ---------------------------------------------------------
-# Detail Page Parsing
+# Chatpia: Extract Card Info
 # ---------------------------------------------------------
-def extract_background_image(style: str, base_url: str) -> str:
-    match = re.search(r"url\((.*?)\)", style or "")
-    if not match:
-        return ""
+def extract_card_info(card, base_url: str) -> dict:
+    # ----------------------
+    # 名前
+    # ----------------------
+    name_el = card.select_one(".name a")
+    raw_name = text_content(name_el)
 
-    raw = match.group(1).strip("'\"")
+    # 年齢span削除 → "kiyomi"
+    raw_name = re.sub(r"\(.*?\)", "", raw_name).strip()
 
-    # Explicit protocol for protocol-relative URLs
-    if raw.startswith("//"):
-        raw = f"https:{raw}"
+    name = sanitize_profile_name(raw_name)
 
-    return urljoin(base_url, raw)
+    # ----------------------
+    # 詳細URL（必須）
+    # ----------------------
+    detail_url = ""
+    if name_el and name_el.has_attr("href"):
+        detail_url = urljoin(base_url, name_el["href"])
 
+    # ----------------------
+    # サムネ背景画像
+    # ----------------------
+    thumb = ""
+    pict_el = card.select_one(".pict")
+    if pict_el and pict_el.has_attr("style"):
+        m = re.search(r"url\((.*?)\)", pict_el["style"])
+        if m:
+            thumb = m.group(1).strip("'\"")
 
-def extract_img_src(card, base_url: str) -> str:
-    candidates = card.select("div.pict img, .pict img, img")
+    # ----------------------
+    # ひとこと
+    # ----------------------
+    comment_el = card.select_one(".hitokoto, .hitokoto_taiki, .hitokoto_new")
+    oneword = text_content(comment_el)
 
-    for img in candidates:
-        src = img.get("data-src") or img.get("src")
-        if not src:
-            continue
+    # ----------------------
+    # 年齢抽出
+    # ----------------------
+    age_from_name = ""
+    age_match = re.search(r"(\d+)", text_content(card.select_one(".name")))
+    if age_match:
+        age_from_name = age_match.group(1)
 
-        if any(keyword in src for keyword in ["icon", "spacer", "fullscreen"]):
-            continue
-
-        return urljoin(base_url, src)
-
-    return ""
-
-
-def find_labeled_value(soup: BeautifulSoup, keywords: list[str]) -> str:
-    def matches(tag):
-        if not getattr(tag, "get_text", None):
-            return False
-        t = tag.get_text(strip=True)
-        return any(k in t for k in keywords)
-
-    label = soup.find(matches)
-    if not label:
-        return ""
-
-    if label.name == "dt":
-        dd = label.find_next_sibling("dd")
-        return text_content(dd)
-
-    if label.name == "th":
-        td = label.find_next_sibling("td")
-        return text_content(td)
-
-    sib = label.find_next(lambda x: x is not label and x.name in {"dd", "td", "span", "div", "p", "li"})
-    return text_content(sib)
+    return {
+        "name": name or "-",
+        "samune": thumb or "",
+        "url": detail_url or "",
+        "oneword": oneword or "",
+        "age_from_name": age_from_name or "",
+    }
 
 
+# ---------------------------------------------------------
+# Detail Page Parsing（Chatpiaは詳細ページ情報が少ない）
+# ---------------------------------------------------------
 def parse_detail_page(detail_url: str) -> dict:
-    if not detail_url:
-        return {k: "" for k in [
-            "age", "height", "cup", "face_public",
-            "toy", "time_slot", "style", "job",
-            "hobby", "favorite_type", "erogenous_zone",
-            "genre_detail",
-        ]}
-
-    html = fetch_html(detail_url)
-    soup = BeautifulSoup(html, "html.parser")
-
-    fields = {
+    # Chatpiaは詳細の構造がバラバラ → 基本空でOK
+    return {
         "age": "",
         "height": "",
         "cup": "",
@@ -149,98 +141,6 @@ def parse_detail_page(detail_url: str) -> dict:
         "genre_detail": "",
     }
 
-    label_map = {
-        "age": ["年齢", "歳", "才"],
-        "height": ["身長", "cm"],
-        "cup": ["カップ", "バスト"],
-        "face_public": ["顔出し", "公開"],
-        "toy": ["おもちゃ", "玩具"],
-        "time_slot": ["出没時間", "時間"],
-        "style": ["スタイル"],
-        "job": ["職業"],
-        "hobby": ["趣味"],
-        "favorite_type": ["好みのタイプ", "好きなタイプ"],
-        "erogenous_zone": ["性感帯"],
-    }
-
-    container = soup.select_one(".profile, .cast-profile, .profile-box")
-
-    if container:
-        for dl in container.select("dl"):
-            dt = dl.find("dt")
-            dd = dl.find("dd")
-            label = text_content(dt)
-            val = text_content(dd)
-            if not label:
-                continue
-            for key, keys in label_map.items():
-                if any(k in label for k in keys):
-                    fields[key] = val
-
-        for table in container.select("table"):
-            for tr in table.select("tr"):
-                th = tr.find("th")
-                td = tr.find("td")
-                label = text_content(th)
-                val = text_content(td)
-                if not label:
-                    continue
-                for key, keys in label_map.items():
-                    if any(k in label for k in keys):
-                        fields[key] = val
-
-        tags = [text_content(t) for t in container.select(".tag, .genre, .badge")]
-        tags = [x for x in tags if x]
-        if tags:
-            fields["genre_detail"] = ", ".join(tags)
-
-    fields["age"] = extract_age_digits(first_non_empty(
-        fields["age"],
-        find_labeled_value(soup, label_map["age"]),
-    ))
-
-    return fields
-
-
-# ---------------------------------------------------------
-# Card Extraction
-# ---------------------------------------------------------
-def extract_card_info(card, base_url: str) -> dict:
-    name_el = card.select_one("div.name a, .name a, h3 a, h4 a")
-    comment_el = card.select_one(
-        "div.hitokoto, div.hitokoto_new, .hitokoto, .hitokoto_new, [class^='hitokoto']"
-    )
-    raw_name = text_content(name_el)
-
-    thumb = ""
-    pic = card.select_one("div.pict[style], .pict[style]")
-    if pic and pic.has_attr("style"):
-        thumb = extract_background_image(pic["style"], base_url)
-
-    if not thumb:
-        thumb = extract_img_src(card, base_url)
-
-    link = name_el if name_el and name_el.has_attr("href") else card.find("a", href=True)
-    detail_url = urljoin(base_url, link["href"]) if link else ""
-
-    age_from_name = ""
-    m = re.match(r"^(.*?)[（(]\s*(\d+)[^）)]*[）)]", raw_name)
-    if m:
-        name = m.group(1).strip()
-        age_from_name = m.group(2)
-    else:
-        name = raw_name
-
-    name = sanitize_profile_name(name)
-
-    return {
-        "name": name or "-",
-        "samune": thumb,
-        "url": detail_url or "-",
-        "oneword": text_content(comment_el),
-        "age_from_name": age_from_name or "",
-    }
-
 
 # ---------------------------------------------------------
 # Fallbacks
@@ -253,7 +153,7 @@ def fill_with_dash(item: dict) -> dict:
 
 
 # ---------------------------------------------------------
-# Main Scraper
+# Main
 # ---------------------------------------------------------
 def scrape_chatpia():
     env_base = os.environ.get("CHATPIA_BASE_URL", "").strip()
@@ -262,9 +162,7 @@ def scrape_chatpia():
     html = fetch_html(base_url)
     soup = BeautifulSoup(html, "html.parser")
 
-    cards = soup.select(
-        "div.chatbox_big, div.chatbox_small, div.chatbox-box, div.line, .chatbox_big, .line"
-    )
+    cards = soup.select("div.chatbox_big, div.chatbox_small, div.chatbox-box, div.line")
     if not cards:
         cards = soup.select("div")
 
@@ -274,20 +172,18 @@ def scrape_chatpia():
     for card in cards:
         info = extract_card_info(card, base_url)
 
+        # サムネ or 一言が取れなかったらスキップ（必須）
         if not info["samune"] or not info["oneword"]:
             continue
 
+        # URL必須
         if not info["url"].startswith("http"):
             continue
         if info["url"] in seen:
             continue
         seen.add(info["url"])
 
-        try:
-            detail = parse_detail_page(info["url"])
-        except Exception as exc:
-            print(f"Detail fetch failed for {info['url']}: {exc}")
-            detail = {}
+        detail = parse_detail_page(info["url"])
 
         item = {
             "name": info["name"],
@@ -315,10 +211,6 @@ def scrape_chatpia():
     success = 0
 
     for item in items:
-        if not item["url"].startswith("http"):
-            print("Skipping invalid URL:", item["url"])
-            continue
-
         try:
             r = requests.post(API_URL, json=item, headers=headers, timeout=20)
             r.raise_for_status()
@@ -332,6 +224,5 @@ def scrape_chatpia():
     print("完了：Chatpia 送信数 →", success)
 
 
-# ---------------------------------------------------------
 if __name__ == "__main__":
     scrape_chatpia()
