@@ -58,6 +58,15 @@ def first_non_empty(*values: str) -> str:
     return ""
 
 
+def extract_age_digits(value: str) -> str:
+    """Return only the numeric age portion (e.g., "21" from "(21歳)")."""
+
+    if not value:
+        return ""
+    digits = re.search(r"(\d+)", value)
+    return digits.group(1) if digits else value
+
+
 def extract_background_image(style: str, base_url: str) -> str:
     match = re.search(r"url\((.*?)\)", style or "")
     if not match:
@@ -189,7 +198,9 @@ def parse_detail_page(detail_url: str) -> dict:
                 return text_content(tag)
         return ""
 
-    fields["age"] = first_non_empty(fields["age"], pick_from_selectors("age"), find_labeled_value(soup, label_map["age"]))
+    fields["age"] = extract_age_digits(
+        first_non_empty(fields["age"], pick_from_selectors("age"), find_labeled_value(soup, label_map["age"]))
+    )
     fields["height"] = first_non_empty(
         fields["height"], pick_from_selectors("height"), find_labeled_value(soup, label_map["height"])
     )
@@ -213,11 +224,23 @@ def extract_card_info(card, base_url: str) -> dict:
     detail_link = card.select_one("a.girl-link[href]") or card.find("a", href=True)
     detail_url = urljoin(base_url, detail_link["href"]) if detail_link else ""
 
+    raw_name = text_content(name_el)
+    name = raw_name
+    age_from_name = ""
+
+    # Many listings embed age in the display name, e.g. "るり♪(19歳)" or "めぐみ*＊(30代)".
+    # Extract the numeric portion so it can be sent as the age field instead of polluting the name.
+    name_age_match = re.match(r"^(.*?)[（(]\s*(\d+)[^）)]*[）)]", raw_name)
+    if name_age_match:
+        name = name_age_match.group(1).strip()
+        age_from_name = name_age_match.group(2)
+
     return {
-        "name": text_content(name_el),
+        "name": name,
         "samune": thumb,
         "url": detail_url,
         "oneword": text_content(comment_el),
+        "age_from_name": age_from_name,
     }
 
 
@@ -253,7 +276,7 @@ def scrape_angel():
             "samune": info["samune"],
             "url": detail_url,
             "oneword": info["oneword"],
-            "age": detail_fields.get("age", ""),
+            "age": extract_age_digits(first_non_empty(detail_fields.get("age", ""), info.get("age_from_name", ""))),
             "height": detail_fields.get("height", ""),
             "cup": detail_fields.get("cup", ""),
             "face_public": detail_fields.get("face_public", ""),
