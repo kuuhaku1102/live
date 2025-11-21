@@ -1,32 +1,37 @@
-name: Scrape Chatpia
+name: Chatpia Scraper
 
 on:
   schedule:
-    - cron: "0 */2 * * *"
-  workflow_dispatch:
+    - cron: "0 */3 * * *"   # 3時間おきに実行（UTCベース）
+  workflow_dispatch:         # 手動実行も可能
 
 jobs:
-  scrape:
+  run-scraper:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
           python-version: "3.11"
 
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
+          python -m pip install --upgrade pip
+          pip install requests beautifulsoup4
 
-      - name: Run scraper
+      - name: Run Chatpia Scraper
         env:
-          API_KEY: ${{ secrets.API_KEY }}
           API_URL: ${{ secrets.API_URL }}
-          CHATPIA_BASE_URL: ${{ secrets.CHATPIA_BASE_URL }}
-          CHATPIA_TRUST_ENV_PROXIES: ${{ secrets.CHATPIA_TRUST_ENV_PROXIES }}
+          API_KEY: ${{ secrets.API_KEY }}
+
+          # Chatpia 関連設定
+          CHATPIA_BASE_URL: "https://www.chatpia.jp/main.php"
+          CHATPIA_TRUST_ENV_PROXIES: "0"
+
         run: |
+          echo "▶ Running Chatpia Scraper..."
           python3 chatpia_scraper.py
