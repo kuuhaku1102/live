@@ -5,13 +5,14 @@ from urllib.parse import urljoin
 import requests
 from requests import RequestException
 from bs4 import BeautifulSoup
+from playwright.sync_api import sync_playwright
 
 API_URL = os.environ.get("API_URL")
 API_KEY = os.environ.get("API_KEY")
 
-# -------------------------------------------
-# Chatpia は UA + Referer + Cookie がほぼ必須
-# -------------------------------------------
+BASE_URL = os.environ.get("CHATPIA_BASE_URL", "https://www.chatpia.jp/main.php").strip() or "https://www.chatpia.jp/main.php"
+
+# ブラウザ用ヘッダー
 DEFAULT_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -20,45 +21,6 @@ DEFAULT_HEADERS = {
     "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
     "Referer": "https://www.chatpia.jp/",
 }
-
-
-# ---------------------------------------------------------
-# Basic Functions
-# ---------------------------------------------------------
-def make_session() -> requests.Session:
-    """Chatpia対策：UA・Referer・Cookie必須"""
-    s = requests.Session()
-    s.headers.update(DEFAULT_HEADERS)
-
-    # GitHub Actions の proxy 無効化（これが重要）
-    trust_env = os.environ.get("CHATPIA_TRUST_ENV_PROXIES", "0") not in {
-        "0", "false", "False", "",
-    }
-    s.trust_env = trust_env
-    if not trust_env:
-        s.proxies = {}
-    return s
-
-
-def fetch_html(url: str) -> str:
-    """Chatpiaブロックを突破するため 2回アクセスする"""
-
-    session = make_session()
-
-    # ★ 1回目 → TOPでCookie取得
-    try:
-        session.get("https://www.chatpia.jp/", timeout=20)
-    except Exception:
-        pass
-
-    # ★ 2回目 → 本命ページ
-    resp = session.get(url, timeout=25)
-    resp.raise_for_status()
-
-    if resp.apparent_encoding:
-        resp.encoding = resp.apparent_encoding
-
-    return resp.text
 
 
 def text_content(tag) -> str:
@@ -86,24 +48,20 @@ def sanitize_profile_name(name: str) -> str:
     return cleaned.strip()
 
 
-# ---------------------------------------------------------
-# Chatpia: 一覧情報取得
-# ---------------------------------------------------------
+# ---------------------- 一覧カード ----------------------
 def extract_card_info(card, base_url: str) -> dict:
-    """Chatpia 一覧ページから名前・サムネ・ひとこと等を取得"""
-
-    # 名前（spanの年齢を除去）
+    # 名前
     name_el = card.select_one(".name a")
     raw_name = text_content(name_el)
     raw_name_no_age = re.sub(r"\(.*?\)", "", raw_name).strip()
     name = sanitize_profile_name(raw_name_no_age)
 
-    # 詳細URL
+    # URL
     detail_url = ""
     if name_el and name_el.has_attr("href"):
         detail_url = urljoin(base_url, name_el["href"])
 
-    # サムネ（背景画像）
+    # サムネ
     thumb = ""
     pict_el = card.select_one(".pict")
     if pict_el and pict_el.has_attr("style"):
@@ -135,21 +93,33 @@ def extract_card_info(card, base_url: str) -> dict:
     }
 
 
-# ---------------------------------------------------------
-# Chatpia: 詳細プロフィール取得
-# ---------------------------------------------------------
+# ---------------------- 詳細プロフィール ----------------------
 def parse_detail_page(detail_url: str) -> dict:
-    """Chatpia の詳細ページ解析"""
-
     if not detail_url:
-        return {k: "" for k in [
-            "age", "height", "cup", "face_public", "toy",
-            "time_slot", "style", "job", "hobby",
-            "favorite_type", "erogenous_zone", "genre_detail",
-        ]}
+        return {
+            "age": "",
+            "height": "",
+            "cup": "",
+            "face_public": "",
+            "toy": "",
+            "time_slot": "",
+            "style": "",
+            "job": "",
+            "hobby": "",
+            "favorite_type": "",
+            "erogenous_zone": "",
+            "genre_detail": "",
+        }
 
-    html = fetch_html(detail_url)
-    soup = BeautifulSoup(html, "html.parser")
+    # requests で詳細ページを取得（ここもPlaywrightにしたいなら差し替え可）
+    session = requests.Session()
+    session.headers.update(DEFAULT_HEADERS)
+    resp = session.get(detail_url, timeout=20)
+    resp.raise_for_status()
+    if resp.apparent_encoding:
+        resp.encoding = resp.apparent_encoding
+
+    soup = BeautifulSoup(resp.text, "html.parser")
 
     fields = {
         "age": "",
@@ -179,107 +149,102 @@ def parse_detail_page(detail_url: str) -> dict:
 
         if "身長" in label:
             fields["height"] = val
-
         elif "スリーサイズ" in label:
             m = re.search(r"([A-ZＡ-Ｚ])カップ", val)
             fields["cup"] = m.group(0) if m else val
-
         elif "職業" in label:
             fields["job"] = val
-
         elif "趣味" in label:
             fields["hobby"] = val
-
         elif "男性のタイプ" in label:
             fields["favorite_type"] = val
-
         elif "出没時間" in label:
             fields["time_slot"] = val
 
     return fields
 
 
-# ---------------------------------------------------------
-# Fallbacks
-# ---------------------------------------------------------
 def fill_with_dash(item: dict) -> dict:
-    """空欄を '-' で埋める"""
     for k, v in item.items():
         if v is None or (isinstance(v, str) and not v.strip()):
             item[k] = "-"
     return item
 
 
-# ---------------------------------------------------------
-# Main
-# ---------------------------------------------------------
+# ---------------------- メイン処理 ----------------------
 def scrape_chatpia():
-    base_url = "https://www.chatpia.jp/main.php"
-
-    # ★ 一覧HTML取得
-    html = fetch_html(base_url)
-
-    # ★ デバッグ表示（重要：ここを見る）
-    print("===== FETCHED HTML START =====")
-    print(html[:3000])
-    print("===== FETCHED HTML END =====")
-
-    soup = BeautifulSoup(html, "html.parser")
-
-    # 一覧カード抽出
-    cards = soup.select("div.chatbox_big, div.chatbox_small")
-    if not cards:
-        cards = soup.select("div.chatbox-box, .line")
-
-    seen = set()
+    success = 0
     items = []
 
-    for card in cards:
-        info = extract_card_info(card, base_url)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(
+            user_agent=DEFAULT_HEADERS["User-Agent"],
+            locale="ja-JP",
+            extra_http_headers={
+                "Accept-Language": DEFAULT_HEADERS["Accept-Language"],
+                "Referer": DEFAULT_HEADERS["Referer"],
+            },
+        )
+        page = context.new_page()
+        page.goto(BASE_URL, wait_until="networkidle", timeout=30000)
 
-        # 必須チェック（サムネ・一言）
-        if not info["samune"] or not info["oneword"]:
-            continue
+        html = page.content()
+        soup = BeautifulSoup(html, "html.parser")
 
-        if not info["url"].startswith("http"):
-            continue
-        if info["url"] in seen:
-            continue
-        seen.add(info["url"])
+        cards = soup.select("div.chatbox_big, div.chatbox_small")
+        if not cards:
+            cards = soup.select("div.chatbox-box, .line")
 
-        # プロフィール詳細取得
-        try:
-            detail = parse_detail_page(info["url"])
-        except Exception as exc:
-            print(f"Detail fetch error for {info['url']}: {exc}")
-            detail = {}
+        seen_urls = set()
 
-        item = {
-            "name": info["name"],
-            "samune": info["samune"],
-            "url": info["url"],
-            "oneword": info["oneword"],
-            "age": extract_age_digits(first_non_empty(detail.get("age", ""), info.get("age_from_name"))) or "-",
-            "height": detail.get("height", "") or "-",
-            "cup": detail.get("cup", "") or "-",
-            "face_public": detail.get("face_public", "") or "-",
-            "toy": detail.get("toy", "") or "-",
-            "time_slot": detail.get("time_slot", "") or "-",
-            "style": detail.get("style", "") or "-",
-            "job": detail.get("job", "") or "-",
-            "hobby": detail.get("hobby", "") or "-",
-            "favorite_type": detail.get("favorite_type", "") or "-",
-            "erogenous_zone": detail.get("erogenous_zone", "") or "-",
-            "genre": detail.get("genre_detail", "") or "Chatpia",
-        }
+        for card in cards:
+            info = extract_card_info(card, BASE_URL)
 
-        fill_with_dash(item)
-        items.append(item)
+            # 必須：サムネ & 一言 & URL
+            if not info["samune"] or not info["oneword"]:
+                continue
+            if not info["url"].startswith("http"):
+                continue
+            if info["url"] in seen_urls:
+                continue
+            seen_urls.add(info["url"])
+
+            # 詳細ページ解析
+            try:
+                detail = parse_detail_page(info["url"])
+            except Exception as exc:
+                print(f"Detail fetch error for {info['url']}: {exc}")
+                detail = {}
+
+            item = {
+                "name": info["name"],
+                "samune": info["samune"],
+                "url": info["url"],
+                "oneword": info["oneword"],
+                "age": extract_age_digits(
+                    first_non_empty(detail.get("age", ""), info.get("age_from_name"))
+                ) or "-",
+                "height": detail.get("height", "") or "-",
+                "cup": detail.get("cup", "") or "-",
+                "face_public": detail.get("face_public", "") or "-",
+                "toy": detail.get("toy", "") or "-",
+                "time_slot": detail.get("time_slot", "") or "-",
+                "style": detail.get("style", "") or "-",
+                "job": detail.get("job", "") or "-",
+                "hobby": detail.get("hobby", "") or "-",
+                "favorite_type": detail.get("favorite_type", "") or "-",
+                "erogenous_zone": detail.get("erogenous_zone", "") or "-",
+                "genre": detail.get("genre_detail", "") or "Chatpia",
+            }
+
+            fill_with_dash(item)
+            items.append(item)
+
+        browser.close()
 
     # API送信
     headers = {"X-API-KEY": API_KEY}
-    success = 0
-
     for item in items:
         try:
             r = requests.post(API_URL, json=item, headers=headers, timeout=20)
