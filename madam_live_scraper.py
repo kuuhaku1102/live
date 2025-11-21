@@ -207,7 +207,8 @@ def extract_card_info(card, base_url: str) -> dict:
 
 
 def scrape_madam():
-    base_url = os.environ.get("MADAM_LIVE_BASE_URL", "https://www.madamlive.tv/")
+    env_base_url = os.environ.get("MADAM_LIVE_BASE_URL", "https://www.madamlive.tv/")
+    base_url = env_base_url.strip() or "https://www.madamlive.tv/"
     html = fetch_html(base_url)
     soup = BeautifulSoup(html, "html.parser")
 
