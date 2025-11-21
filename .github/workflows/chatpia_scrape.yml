@@ -2,8 +2,8 @@ name: Chatpia Scraper
 
 on:
   schedule:
-    - cron: "0 */3 * * *"   # 3時間おきに実行（UTCベース）
-  workflow_dispatch:         # 手動実行も可能
+    - cron: "0 */3 * * *"   # 3時間おき（UTC）
+  workflow_dispatch:
 
 jobs:
   run-scraper:
@@ -21,17 +21,14 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests beautifulsoup4
+          pip install requests beautifulsoup4 playwright
+          python -m playwright install --with-deps chromium
 
-      - name: Run Chatpia Scraper
+      - name: Run Chatpia Scraper (Playwright)
         env:
           API_URL: ${{ secrets.API_URL }}
           API_KEY: ${{ secrets.API_KEY }}
-
-          # Chatpia 関連設定
           CHATPIA_BASE_URL: "https://www.chatpia.jp/main.php"
-          CHATPIA_TRUST_ENV_PROXIES: "0"
-
         run: |
-          echo "▶ Running Chatpia Scraper..."
-          python3 chatpia_scraper.py
+          echo "▶ Running Chatpia Scraper (Playwright)..."
+          python3 chatpia_scraper_playwright.py
