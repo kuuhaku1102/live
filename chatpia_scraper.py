@@ -207,7 +207,9 @@ def parse_detail_page(detail_url: str) -> dict:
 # ---------------------------------------------------------
 def extract_card_info(card, base_url: str) -> dict:
     name_el = card.select_one("div.name a, .name a, h3 a, h4 a")
-    comment_el = card.select_one("div.hitokoto, div.hitokoto_new, .hitokoto, .hitokoto_new")
+    comment_el = card.select_one(
+        "div.hitokoto, div.hitokoto_new, .hitokoto, .hitokoto_new, [class^='hitokoto']"
+    )
     raw_name = text_content(name_el)
 
     thumb = ""
@@ -233,9 +235,9 @@ def extract_card_info(card, base_url: str) -> dict:
 
     return {
         "name": name or "-",
-        "samune": thumb or "-",
+        "samune": thumb,
         "url": detail_url or "-",
-        "oneword": text_content(comment_el) or "-",
+        "oneword": text_content(comment_el),
         "age_from_name": age_from_name or "",
     }
 
@@ -260,7 +262,9 @@ def scrape_chatpia():
     html = fetch_html(base_url)
     soup = BeautifulSoup(html, "html.parser")
 
-    cards = soup.select("div.line, div.chatbox-box, .line")
+    cards = soup.select(
+        "div.chatbox_big, div.chatbox_small, div.chatbox-box, div.line, .chatbox_big, .line"
+    )
     if not cards:
         cards = soup.select("div")
 
@@ -269,6 +273,9 @@ def scrape_chatpia():
 
     for card in cards:
         info = extract_card_info(card, base_url)
+
+        if not info["samune"] or not info["oneword"]:
+            continue
 
         if not info["url"].startswith("http"):
             continue
