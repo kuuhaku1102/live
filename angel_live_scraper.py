@@ -18,14 +18,9 @@ DEFAULT_HEADERS = {
 
 
 def make_session() -> requests.Session:
-    """Create a session that optionally ignores proxy env vars."""
-
     session = requests.Session()
     trust_env = os.environ.get("ANGEL_LIVE_TRUST_ENV_PROXIES", "0") not in {
-        "0",
-        "false",
-        "False",
-        "",
+        "0", "false", "False", ""
     }
     session.trust_env = trust_env
     if not trust_env:
@@ -38,9 +33,6 @@ def fetch_html(url: str) -> str:
     resp = session.get(url, headers=DEFAULT_HEADERS, timeout=20)
     resp.raise_for_status()
 
-    # Angel Live pages are often served with legacy Japanese encodings, and the
-    # response header may incorrectly declare UTF-8. Always prefer the detected
-    # encoding to avoid mojibake in names/comments before parsing.
     if resp.apparent_encoding:
         resp.encoding = resp.apparent_encoding
 
@@ -59,21 +51,15 @@ def first_non_empty(*values: str) -> str:
 
 
 def extract_age_digits(value: str) -> str:
-    """Return only the numeric age portion (e.g., "21" from "(21歳)")."""
-
     if not value:
         return ""
-    digits = re.search(r"(\d+)", value)
-    return digits.group(1) if digits else value
+    m = re.search(r"(\d+)", value)
+    return m.group(1) if m else ""
 
 
 def sanitize_profile_name(name: str) -> str:
-    """Strip characters that can break WP slug/SQL generation."""
-
     if not name:
         return ""
-
-    # Allow alphanumerics, underscores, whitespace, Japanese scripts, and common dashes.
     cleaned = re.sub(r"[^\w\sぁ-ゟ゠-ヿ一-龥々ー０-９Ａ-Ｚａ-ｚー-]+", "", name)
     return cleaned.strip()
 
@@ -100,35 +86,23 @@ def find_labeled_value(soup: BeautifulSoup, keywords: list[str]) -> str:
         sibling = label.find_next_sibling("dd")
         if sibling:
             return text_content(sibling)
+
     if label.name == "th":
         sibling = label.find_next_sibling("td")
         if sibling:
             return text_content(sibling)
 
-    sibling = label.find_next(
-        lambda tag: tag is not label and tag.name in {"dd", "td", "span", "div", "p", "li"}
-    )
+    sibling = label.find_next(lambda tag: tag is not label and tag.name in {"dd", "td", "span", "div", "p", "li"})
     return text_content(sibling)
 
 
 def parse_detail_page(detail_url: str) -> dict:
-    """Parse detail page fields from Angel Live profiles."""
-
     if not detail_url:
-        return {
-            "age": "",
-            "height": "",
-            "cup": "",
-            "face_public": "",
-            "toy": "",
-            "time_slot": "",
-            "style": "",
-            "job": "",
-            "hobby": "",
-            "favorite_type": "",
-            "erogenous_zone": "",
-            "genre_detail": "",
-        }
+        return {k: "" for k in [
+            "age", "height", "cup", "face_public",
+            "toy", "time_slot", "style", "job",
+            "hobby", "favorite_type", "erogenous_zone", "genre_detail"
+        ]}
 
     html = fetch_html(detail_url)
     soup = BeautifulSoup(html, "html.parser")
@@ -163,6 +137,7 @@ def parse_detail_page(detail_url: str) -> dict:
     }
 
     profile_container = soup.select_one(".profile, .cast-profile, .profile-box")
+
     if profile_container:
         for dl in profile_container.select("dl"):
             dt = dl.find("dt")
@@ -171,11 +146,9 @@ def parse_detail_page(detail_url: str) -> dict:
             value = text_content(dd)
             if not label:
                 continue
-
             for field, keywords in label_map.items():
                 if any(key in label for key in keywords):
                     fields[field] = value
-                    break
 
         for table in profile_container.select("table"):
             for row in table.select("tr"):
@@ -188,7 +161,6 @@ def parse_detail_page(detail_url: str) -> dict:
                 for field, keywords in label_map.items():
                     if any(key in label for key in keywords):
                         fields[field] = value
-                        break
 
         genre_tags = [text_content(tag) for tag in profile_container.select(".tag, .genre, .badge")]
         genre_tags = [g for g in genre_tags if g]
@@ -202,23 +174,15 @@ def parse_detail_page(detail_url: str) -> dict:
         "face_public": [".face", "span.face", "li.face", "td.face"],
     }
 
-    def pick_from_selectors(key: str) -> str:
+    def pick_from_selector(key: str) -> str:
         for sel in selectors[key]:
             tag = soup.select_one(sel)
             if tag and text_content(tag):
                 return text_content(tag)
         return ""
 
-    fields["age"] = extract_age_digits(
-        first_non_empty(fields["age"], pick_from_selectors("age"), find_labeled_value(soup, label_map["age"]))
-    )
-    fields["height"] = first_non_empty(
-        fields["height"], pick_from_selectors("height"), find_labeled_value(soup, label_map["height"])
-    )
-    fields["cup"] = first_non_empty(fields["cup"], pick_from_selectors("cup"), find_labeled_value(soup, label_map["cup"]))
-    fields["face_public"] = first_non_empty(
-        fields["face_public"], pick_from_selectors("face_public"), find_labeled_value(soup, label_map["face_public"])
-    )
+    fields["age"] = extract_age_digits(first_non_empty(fields["age"], pick_from_selector("age"), find_labeled_value(soup, label_map["age"])))
+    fields["height"] = first_non_empty(fields["height"], pick_from_selector("height"), find_labeled_value(soup, label_map["height"]))
 
     return fields
 
@@ -226,8 +190,8 @@ def parse_detail_page(detail_url: str) -> dict:
 def extract_card_info(card, base_url: str) -> dict:
     name_el = card.select_one("h3.girl-prof__name, .girl-prof__name, h3, h4")
     comment_el = card.select_one("div.girl-comment p.girl-comment__txt, .girl-comment__txt")
-    thumb = ""
 
+    thumb = ""
     style_holder = card.select_one(".girl-pic__image[style]")
     if style_holder and style_holder.has_attr("style"):
         thumb = extract_background_image(style_holder["style"], base_url)
@@ -239,8 +203,6 @@ def extract_card_info(card, base_url: str) -> dict:
     name = raw_name
     age_from_name = ""
 
-    # Many listings embed age in the display name, e.g. "るり♪(19歳)" or "めぐみ*＊(30代)".
-    # Extract the numeric portion so it can be sent as the age field instead of polluting the name.
     name_age_match = re.match(r"^(.*?)[（(]\s*(\d+)[^）)]*[）)]", raw_name)
     if name_age_match:
         name = name_age_match.group(1).strip()
@@ -249,46 +211,26 @@ def extract_card_info(card, base_url: str) -> dict:
     name = sanitize_profile_name(name)
 
     return {
-        "name": name,
-        "samune": thumb,
-        "url": detail_url,
-        "oneword": text_content(comment_el),
-        "age_from_name": age_from_name,
+        "name": name or "-",
+        "samune": thumb or "-",
+        "url": detail_url or "-",
+        "oneword": text_content(comment_el) or "-",
+        "age_from_name": age_from_name or "",
     }
 
 
-def fill_missing_with_hyphen(item: dict) -> dict:
-    """Ensure all expected fields are populated with '-' when missing."""
-
-    keys = [
-        "name",
-        "samune",
-        "oneword",
-        "age",
-        "height",
-        "cup",
-        "face_public",
-        "toy",
-        "time_slot",
-        "style",
-        "job",
-        "hobby",
-        "favorite_type",
-        "erogenous_zone",
-        "genre",
-    ]
-
-    for key in keys:
-        value = item.get(key, "")
+def fill_missing_with_dash(item: dict) -> dict:
+    """
+    必須項目以外は "-" を許容
+    """
+    for key, value in item.items():
         if value is None or (isinstance(value, str) and not value.strip()):
             item[key] = "-"
-
     return item
 
 
 def scrape_angel():
-    env_base_url = os.environ.get("ANGEL_LIVE_BASE_URL", "https://www.angel-live.com/home/")
-    base_url = env_base_url.strip() or "https://www.angel-live.com/home/"
+    base_url = os.environ.get("ANGEL_LIVE_BASE_URL", "https://www.angel-live.com/home/").strip()
 
     html = fetch_html(base_url)
     soup = BeautifulSoup(html, "html.parser")
@@ -302,46 +244,48 @@ def scrape_angel():
 
     for card in cards:
         info = extract_card_info(card, base_url)
+
         detail_url = info.get("url")
-        if not detail_url or detail_url in seen:
+        if not detail_url or detail_url in seen or detail_url == "-":
             continue
         seen.add(detail_url)
 
-        detail_fields = {}
         try:
             detail_fields = parse_detail_page(detail_url)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(f"Detail fetch failed for {detail_url}: {exc}")
+            detail_fields = {}
 
         item = {
             "name": info["name"],
             "samune": info["samune"],
             "url": detail_url,
             "oneword": info["oneword"],
-            "age": extract_age_digits(first_non_empty(detail_fields.get("age", ""), info.get("age_from_name", ""))),
-            "height": detail_fields.get("height", ""),
-            "cup": detail_fields.get("cup", ""),
-            "face_public": detail_fields.get("face_public", ""),
-            "toy": detail_fields.get("toy", ""),
-            "time_slot": detail_fields.get("time_slot", ""),
-            "style": detail_fields.get("style", ""),
-            "job": detail_fields.get("job", ""),
-            "hobby": detail_fields.get("hobby", ""),
-            "favorite_type": detail_fields.get("favorite_type", ""),
-            "erogenous_zone": detail_fields.get("erogenous_zone", ""),
-            "genre": first_non_empty(detail_fields.get("genre_detail", ""), "Angel Live"),
+            "age": extract_age_digits(first_non_empty(detail_fields.get("age", ""), info.get("age_from_name", ""))) or "-",
+            "height": detail_fields.get("height", "") or "-",
+            "cup": detail_fields.get("cup", "") or "-",
+            "face_public": detail_fields.get("face_public", "") or "-",
+            "toy": detail_fields.get("toy", "") or "-",
+            "time_slot": detail_fields.get("time_slot", "") or "-",
+            "style": detail_fields.get("style", "") or "-",
+            "job": detail_fields.get("job", "") or "-",
+            "hobby": detail_fields.get("hobby", "") or "-",
+            "favorite_type": detail_fields.get("favorite_type", "") or "-",
+            "erogenous_zone": detail_fields.get("erogenous_zone", "") or "-",
+            "genre": detail_fields.get("genre_detail", "") or "Angel Live",
         }
 
-        fill_missing_with_hyphen(item)
-
+        fill_missing_with_dash(item)
         items.append(item)
 
     headers = {"X-API-KEY": API_KEY}
     success_count = 0
 
     for item in items:
-        if not item.get("name") or not item.get("url"):
-            print("Skipping incomplete item:", item)
+
+        # URL が正しくない場合は送信しない（必須・一意）
+        if not item["url"].startswith("http"):
+            print("Skipping invalid URL:", item["name"], item["url"])
             continue
 
         try:
@@ -349,10 +293,10 @@ def scrape_angel():
             r.raise_for_status()
             success_count += 1
             print("Posted:", item["name"], r.text)
-        except RequestException as exc:  # noqa: BLE001
+        except RequestException as exc:
             status = getattr(getattr(exc, "response", None), "status_code", "no-status")
             body = getattr(getattr(exc, "response", None), "text", "")
-            print(f"Post failed for {item.get('name', '')} (status={status}): {exc}. Body: {body}")
+            print(f"Post failed for {item.get('name')} (status={status}): {exc}. Body: {body}")
 
     print("完了：Angel Live 送信数 →", success_count)
 
