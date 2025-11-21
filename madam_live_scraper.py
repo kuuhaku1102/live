@@ -180,9 +180,13 @@ def parse_detail_page(detail_url: str) -> dict:
 
 def extract_card_info(card, base_url: str) -> dict:
     name_el = card.select_one(
-        ".name, .nickname, .user_name, .user-name, .nick, .nick_name, h3, h4, p.name, .live-name"
+        ".name, .nickname, .user_name, .user-name, .nick, .nick_name, h3, h4, p.name, .live-name, "
+        "span.onlinegirl-dt-name-span-big h3 a, span.onlinegirl-dt-name-span-big a"
     )
-    comment_el = card.select_one(".comment, .message, .tagline, .catch, .live-comment, p.comment")
+    comment_el = card.select_one(
+        ".comment, .message, .tagline, .catch, .live-comment, p.comment, "
+        "span.onlinegirl-dd-comment-span-big, .onlinegirl-dd-comment-span-big a"
+    )
     image_tag = card.find("img")
 
     thumb = ""
@@ -217,6 +221,9 @@ def scrape_madam():
         "div.cast-box",  # common card container
         "li.cast",  # list item cards
         "div.card",  # generic cards
+        "dl.onlinegirl-dl-big",  # Madam Live desktop cards
+        "dl.onlinegirl-dl",  # Madam Live small cards
+        "dl[id^='stat_']",  # Madam Live fallback dl cards
         "section a[href]",  # fallback anchors
     ]:
         cards = soup.select(selector)
