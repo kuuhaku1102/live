@@ -73,7 +73,30 @@ def extract_background_image(style: str, base_url: str) -> str:
     match = re.search(r"url\((.*?)\)", style or "")
     if not match:
         return ""
-    return urljoin(base_url, match.group(1).strip("'\""))
+
+    raw = match.group(1).strip("'\"")
+
+    # Explicit protocol for protocol-relative URLs
+    if raw.startswith("//"):
+        raw = f"https:{raw}"
+
+    return urljoin(base_url, raw)
+
+
+def extract_img_src(card, base_url: str) -> str:
+    candidates = card.select("div.pict img, .pict img, img")
+
+    for img in candidates:
+        src = img.get("data-src") or img.get("src")
+        if not src:
+            continue
+
+        if any(keyword in src for keyword in ["icon", "spacer", "fullscreen"]):
+            continue
+
+        return urljoin(base_url, src)
+
+    return ""
 
 
 def find_labeled_value(soup: BeautifulSoup, keywords: list[str]) -> str:
@@ -191,6 +214,9 @@ def extract_card_info(card, base_url: str) -> dict:
     pic = card.select_one("div.pict[style], .pict[style]")
     if pic and pic.has_attr("style"):
         thumb = extract_background_image(pic["style"], base_url)
+
+    if not thumb:
+        thumb = extract_img_src(card, base_url)
 
     link = name_el if name_el and name_el.has_attr("href") else card.find("a", href=True)
     detail_url = urljoin(base_url, link["href"]) if link else ""
