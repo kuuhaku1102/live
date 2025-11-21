@@ -67,6 +67,17 @@ def extract_age_digits(value: str) -> str:
     return digits.group(1) if digits else value
 
 
+def sanitize_profile_name(name: str) -> str:
+    """Strip characters that can break WP slug/SQL generation."""
+
+    if not name:
+        return ""
+
+    # Allow alphanumerics, underscores, whitespace, Japanese scripts, and common dashes.
+    cleaned = re.sub(r"[^\w\sぁ-ゟ゠-ヿ一-龥々ー０-９Ａ-Ｚａ-ｚー-]+", "", name)
+    return cleaned.strip()
+
+
 def extract_background_image(style: str, base_url: str) -> str:
     match = re.search(r"url\((.*?)\)", style or "")
     if not match:
@@ -234,6 +245,8 @@ def extract_card_info(card, base_url: str) -> dict:
     if name_age_match:
         name = name_age_match.group(1).strip()
         age_from_name = name_age_match.group(2)
+
+    name = sanitize_profile_name(name)
 
     return {
         "name": name,
