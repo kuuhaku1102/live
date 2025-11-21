@@ -3,6 +3,7 @@ import re
 from urllib.parse import urljoin
 
 import requests
+from requests import RequestException
 from bs4 import BeautifulSoup
 
 API_URL = os.environ.get("API_URL")
@@ -262,12 +263,24 @@ def scrape_angel():
         items.append(item)
 
     headers = {"X-API-KEY": API_KEY}
-    for item in items:
-        r = requests.post(API_URL, json=item, headers=headers, timeout=20)
-        r.raise_for_status()
-        print("Posted:", item["name"], r.text)
+    success_count = 0
 
-    print("完了：Angel Live 送信数 →", len(items))
+    for item in items:
+        if not item.get("name") or not item.get("url"):
+            print("Skipping incomplete item:", item)
+            continue
+
+        try:
+            r = requests.post(API_URL, json=item, headers=headers, timeout=20)
+            r.raise_for_status()
+            success_count += 1
+            print("Posted:", item["name"], r.text)
+        except RequestException as exc:  # noqa: BLE001
+            status = getattr(getattr(exc, "response", None), "status_code", "no-status")
+            body = getattr(getattr(exc, "response", None), "text", "")
+            print(f"Post failed for {item.get('name', '')} (status={status}): {exc}. Body: {body}")
+
+    print("完了：Angel Live 送信数 →", success_count)
 
 
 if __name__ == "__main__":
